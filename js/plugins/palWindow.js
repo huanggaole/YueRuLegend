@@ -106,7 +106,7 @@
         '#d9b45a'
     ];
     Window_TitleCommand.prototype.redrawItem = function(index) {
-        console.log(this);
+        // console.log(this);
         // 清除当前项目区域的绘制内容
         const rect = this.itemRect(index);
         this.contents.clearRect(rect.x, rect.y, rect.width, rect.height);
