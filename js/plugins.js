@@ -4,5 +4,6 @@ var $plugins =
 [
 {"name":"UltraMode7","status":true,"description":"Renders the tilemap in 3D. Supports various parameters such as yaw rotation,\npitch, field of view, etc.","parameters":{"FADE_Z_COLOR":"1,1,1","FADE_Z_BEGIN":"500","FADE_Z_END":"1150","BASE_SCALE_Z":"550","LEGACY_SCALING":"false","PARALLAX_SCROLL_X_MULTIPLIER":"0.5","PARALLAX_SCROLL_Y_MULTIPLIER":"1.0","TILEMAP_PIXELATED":"true","CHARACTERS_PIXELATED":"true","CHARACTERS_ADJUST_SPRITE_DIRECTION":"false","CHARACTERS_USE_FADE_Z":"true","CHARACTERS_SHIFT_Y":"6","PLAYER_ADJUST_MOVE_DIRECTION":"false","LOOP_MAPS_EXTEND_TILES":"3","LOOP_MAPS_EXTEND_TILES_SMART":"true","DEFAULT_FOV":"62","DEFAULT_PITCH":"45","DEFAULT_YAW":"0","DEFAULT_ROLL":"0","DEFAULT_CAMERA_DISTANCE":"550","DEFAULT_CAMERA_Y":"0","DEFAULT_NEAR_CLIP_Z":"100","DEFAULT_FAR_CLIP_Z":"1200","DEFAULT_PARALLAX_DISTANCE":"550"}},
 {"name":"palWindow","status":true,"description":"","parameters":{}},
-{"name":"palScene","status":true,"description":"重写标题场景，仅保留新游戏与继续游戏选项。","parameters":{}}
+{"name":"palScene","status":true,"description":"重写标题场景，仅保留新游戏与继续游戏选项。","parameters":{}},
+{"name":"IsometricView","status":false,"description":"将地图转换为斜45°视角，调整图块渲染和角色控制","parameters":{}}
 ];

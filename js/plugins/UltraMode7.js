@@ -3466,8 +3466,8 @@ Sprite_Character.prototype.update = function()
 
 Sprite_Character.prototype._ultraMode7PreUpdate = function()
 {
-	this.scale.x = 1;
-	this.scale.y = 1;
+	this.scale.x = 2;
+	this.scale.y = 2;
 	this.rotation = 0;
 };
 
