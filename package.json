@@ -4,8 +4,8 @@
     "chromium-args": "--force-color-profile=srgb",
     "window": {
         "title": "月如续传",
-        "width": 816,
-        "height": 624,
+        "width": 800,
+        "height": 600,
         "position": "center",
         "icon": "icon/icon.png"
     }
