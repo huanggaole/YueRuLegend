@@ -30,7 +30,7 @@
  * @decimals 2
  * @min -1000
  * @max 1000
- * @default 0
+ * @default 320
  * 
  * @param transformD
  * @text 变换矩阵 d
@@ -57,24 +57,6 @@
  * @decimals 2
  * @min -1000
  * @max 1000
- * @default 0
- *
- * @param centeringOffsetX
- * @text 居中偏移 X
- * @desc 等距变换后的地图居中偏移X值
- * @type number
- * @decimals 0
- * @min -2000
- * @max 2000
- * @default 320
- *
- * @param centeringOffsetY
- * @text 居中偏移 Y
- * @desc 等距变换后的地图居中偏移Y值
- * @type number
- * @decimals 0
- * @min -2000
- * @max 2000
  * @default 0
  *
  * @help IsometricView.js
@@ -142,7 +124,7 @@
                     layer.transform.setFromMatrix(new PIXI.Matrix(
                         TRANSFORM_MATRIX.a, TRANSFORM_MATRIX.d,
                         TRANSFORM_MATRIX.b, TRANSFORM_MATRIX.e,
-                        CENTERING_OFFSET.x, CENTERING_OFFSET.y
+                        TRANSFORM_MATRIX.c, TRANSFORM_MATRIX.f,
                     ));
                 }
             });
@@ -159,7 +141,7 @@
             this._tilemap.transform.setFromMatrix(new PIXI.Matrix(
                 TRANSFORM_MATRIX.a, TRANSFORM_MATRIX.d,
                 TRANSFORM_MATRIX.b, TRANSFORM_MATRIX.e,
-                CENTERING_OFFSET.x, CENTERING_OFFSET.y
+                TRANSFORM_MATRIX.c, TRANSFORM_MATRIX.f,
             ));
         }
     };
@@ -190,6 +172,20 @@
                 }
             });
         }
+    };
+    
+    
+    // 点击地图的坐标进行逆仿射运算
+    /*
+    Scene_Map.prototype.onMapTouch = function() {
+        console.log(TouchInput.x, TouchInput.y);
+        // 获取点击位置的瓦片ID
+        $gameTemp.setDestination($gameMap.canvasToMapX(newx), $gameMap.canvasToMapY(newy));
+    };
+    */
+    // 禁用默认的地图触摸事件
+    Scene_Map.prototype.isMapTouchOk = function() {
+        return false;
     };
 
     // 添加插件指令
