@@ -98,12 +98,6 @@
         f: parseFloat(parameters['transformF']) || 0
     };
 
-    // 计算居中偏移量（从插件参数读取）
-    const CENTERING_OFFSET = {
-        x: parseFloat(parameters['centeringOffsetX'] || '320'),
-        y: parseFloat(parameters['centeringOffsetY'] || '0')
-    };
-
     // 重写Tilemap以实现真正的瓦片变换
     const _Tilemap_initialize = Tilemap.prototype.initialize;
     Tilemap.prototype.initialize = function() {
