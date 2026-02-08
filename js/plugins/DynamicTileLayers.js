@@ -21,6 +21,8 @@ function Sprite_DynamicTile() {
 Sprite_DynamicTile.prototype = Object.create(Sprite.prototype);
 Sprite_DynamicTile.prototype.constructor = Sprite_DynamicTile;
 
+Sprite_DynamicTile.SHOW_DEBUG = false; // Performance Switch: Set true to see height numbers
+
 Sprite_DynamicTile.prototype.initialize = function (tileId, mx, my, bias, height) {
     Sprite.prototype.initialize.call(this);
     this._tileId = tileId;
@@ -42,7 +44,8 @@ Sprite_DynamicTile.prototype.initialize = function (tileId, mx, my, bias, height
 };
 
 Sprite_DynamicTile.prototype.createDebugSprite = function () {
-    // Create a small text sprite to show height
+    if (!Sprite_DynamicTile.SHOW_DEBUG) return; // Optimization
+
     const bitmap = new Bitmap(32, 20);
     bitmap.fontSize = 14;
     bitmap.drawText(this._height, 0, 0, 32, 20, "center");
@@ -142,10 +145,10 @@ Sprite_DynamicTile.prototype.updatePosition = function () {
     const scrolledX = $gameMap.adjustX(this._mx);
     const scrolledY = $gameMap.adjustY(this._my);
 
-    // Use Math.floor to match RMMZ's Integer-based Screen Coordinates
-    // This prevents "Jumping" caused by float precision mismatches with Characters
-    this.x = Math.floor(scrolledX * tw);
-    this.y = Math.floor((scrolledY + 1) * th);
+    // Use Math.round to match RMMZ's Sprite_Character Screen Coordinates
+    // This prevents "Jumping" caused by precision mismatches (Floor vs Round)
+    this.x = Math.round(scrolledX * tw);
+    this.y = Math.round((scrolledY + 1) * th);
 
     // Sort Priority:
     // Game_Character screenY is (y+1)*th - shiftY (usually 6).
@@ -191,12 +194,6 @@ Tilemap.prototype._clearDynamicSprites = function () {
 Tilemap.prototype._addDynamicTile = function (tileId, mx, my) {
     const sprite = new Sprite_DynamicTile(tileId, mx, my);
     this.addChild(sprite);
-    this._dynamicSprites.push(sprite);
-};
-
-Tilemap.prototype._processHighTile = function (tileId, dx, dy, mx, my) {
-    if (tileId === 0) return false;
-
     // Check height flag (High 4 bits)
     const flag = this.flags[tileId] >> 12;
 
@@ -206,6 +203,21 @@ Tilemap.prototype._processHighTile = function (tileId, dx, dy, mx, my) {
         return true; // Handled as sprite
     } else {
         return false; // Not a high tile
+    }
+};
+
+// Override Tilemap.update to ensure our sprites are updated
+const _Tilemap_update = Tilemap.prototype.update;
+Tilemap.prototype.update = function () {
+    _Tilemap_update.call(this);
+
+    // Manually update all dynamic sprites
+    // This is necessary because PIXI/Tilemap doesn't auto-update children
+    // and we need them to track the camera scroll every frame.
+    if (this._dynamicSprites) {
+        for (const sprite of this._dynamicSprites) {
+            sprite.update();
+        }
     }
 };
 
