@@ -100,7 +100,7 @@
 
     // 重写Tilemap以实现真正的瓦片变换
     const _Tilemap_initialize = Tilemap.prototype.initialize;
-    Tilemap.prototype.initialize = function() {
+    Tilemap.prototype.initialize = function () {
         _Tilemap_initialize.call(this);
         this._isometricEnabled = true;
         this._margin = 250;
@@ -108,7 +108,7 @@
 
     // 重写瓦片层的创建以应用变换
     const _Tilemap__createLayers = Tilemap.prototype._createLayers;
-    Tilemap.prototype._createLayers = function() {
+    Tilemap.prototype._createLayers = function () {
         _Tilemap__createLayers.call(this);
 
         // 启用瓦片层的等距变换
@@ -127,7 +127,7 @@
 
     // 重写Spriteset_Map以确保整个地图场景应用变换
     const _Spriteset_Map_createTilemap = Spriteset_Map.prototype.createTilemap;
-    Spriteset_Map.prototype.createTilemap = function() {
+    Spriteset_Map.prototype.createTilemap = function () {
         _Spriteset_Map_createTilemap.call(this);
 
         // 对整个tilemap容器应用变换
@@ -141,7 +141,7 @@
     };
 
     const _Spriteset_Map_createCharacters = Spriteset_Map.prototype.createCharacters;
-    Spriteset_Map.prototype.createCharacters = function() {
+    Spriteset_Map.prototype.createCharacters = function () {
         _Spriteset_Map_createCharacters.call(this);
 
         // 对角色精灵应用逆变换，抵消tilemap的仿射变换
@@ -149,7 +149,7 @@
             this._characterSprites.forEach(sprite => {
                 if (sprite) {
                     // 计算逆变换矩阵
-                    
+
                     const det = TRANSFORM_MATRIX.a * TRANSFORM_MATRIX.e - TRANSFORM_MATRIX.b * TRANSFORM_MATRIX.d;
                     const inverseMatrix = new PIXI.Matrix(
                         TRANSFORM_MATRIX.e / det, -TRANSFORM_MATRIX.d / det, // a, d
@@ -167,8 +167,8 @@
             });
         }
     };
-    
-    
+
+
     // 点击地图的坐标进行逆仿射运算
     /*
     Scene_Map.prototype.onMapTouch = function() {
@@ -177,9 +177,83 @@
         $gameTemp.setDestination($gameMap.canvasToMapX(newx), $gameMap.canvasToMapY(newy));
     };
     */
-    // 禁用默认的地图触摸事件
+    // 移除禁用触摸的限制，恢复地图点击功能
+    /*
     Scene_Map.prototype.isMapTouchOk = function() {
         return false;
+    };
+    */
+
+    // 重写坐标转换以支持等距投影
+    // 注意：IsometricView 需要同时知道 x 和 y 坐标才能反解，
+    // 但 RMMZ 分别调用 canvasToMapX 和 canvasToMapY。
+    // 我们假设调用这些函数时主要用于处理当前触摸输入的坐标，
+    // 因此使用 TouchInput.y 配合 x，或 TouchInput.x 配合 y。
+
+    const _Game_Map_canvasToMapX = Game_Map.prototype.canvasToMapX;
+    Game_Map.prototype.canvasToMapX = function (x) {
+        // 如果没有启用等距变换，回退到默认逻辑
+        // (这里很难检测是否启用，但既然这是专用插件，默认启用)
+        // 实际上可以检查 $gameMap.tileset() 但这个函数较底层
+
+        const tileWidth = this.tileWidth();
+        const tileHeight = this.tileHeight();
+
+        // 矩阵参数
+        const a = TRANSFORM_MATRIX.a;
+        const b = TRANSFORM_MATRIX.b;
+        const c = TRANSFORM_MATRIX.c; // tx
+        const d = TRANSFORM_MATRIX.d;
+        const e = TRANSFORM_MATRIX.e;
+        const f = TRANSFORM_MATRIX.f; // ty
+
+        const det = a * e - b * d;
+        if (det === 0) return _Game_Map_canvasToMapX.call(this, x);
+
+        // 屏幕坐标 (相对于变换原点)
+        // RMMZ默认并没有对整个GameMap做变换，而是对Tilemap做变换
+        // 假设变换是以(0,0)为中心或者按照默认Tilemap行为
+
+        const sx = x - c;
+        const sy = TouchInput.y - f; // 使用当前触摸Y
+
+        // 反解矩阵
+        // x_local = (e * sx - b * sy) / det
+        // y_local = (a * sy - d * sx) / det
+
+        const localX = (e * sx - b * sy) / det;
+
+        // 转换为地图网格坐标
+        // localX 是像素坐标，需要除以图块宽度，并加上滚动偏移
+        const mapX = Math.floor(localX / tileWidth + this._displayX);
+
+        return this.roundX(mapX);
+    };
+
+    const _Game_Map_canvasToMapY = Game_Map.prototype.canvasToMapY;
+    Game_Map.prototype.canvasToMapY = function (y) {
+        const tileWidth = this.tileWidth();
+        const tileHeight = this.tileHeight();
+
+        const a = TRANSFORM_MATRIX.a;
+        const b = TRANSFORM_MATRIX.b;
+        const c = TRANSFORM_MATRIX.c; // tx
+        const d = TRANSFORM_MATRIX.d;
+        const e = TRANSFORM_MATRIX.e;
+        const f = TRANSFORM_MATRIX.f; // ty
+
+        const det = a * e - b * d;
+        if (det === 0) return _Game_Map_canvasToMapY.call(this, y);
+
+        const sx = TouchInput.x - c; // 使用当前触摸X
+        const sy = y - f;
+
+        // y_local = (a * sy - d * sx) / det
+        const localY = (a * sy - d * sx) / det;
+
+        const mapY = Math.floor(localY / tileHeight + this._displayY);
+
+        return this.roundY(mapY);
     };
 
     // 添加插件指令
