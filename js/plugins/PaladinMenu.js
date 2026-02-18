@@ -13,11 +13,7 @@
  */
 
 (() => {
-    // Colors for breathing effect (Gold/Yellow gradient)
-    const selectedColors = [
-        '#d6ad4e', '#d9b45a', '#e0c066', '#e7cc72', '#edda7e',
-        '#f3e472', '#edda7e', '#e7cc72', '#e0c066', '#d9b45a'
-    ];
+    // Colors for breathing effect moved to palWindow.js (Window_PaladinBase)
 
     //-----------------------------------------------------------------------------
     // Scene_Menu Override
@@ -41,6 +37,7 @@
     Scene_Menu.prototype.create = function () {
         Scene_MenuBase.prototype.create.call(this);
         this.createCommandWindow();
+        this.createSystemWindow();
         this.createGoldWindow();
         // this.createStatusWindow(); // EXPLICITLY REMOVED
     };
@@ -91,12 +88,69 @@
     Scene_Menu.prototype.commandWindowRect = function () {
         // Position based on user adjustments
         const ww = 200;
-        const wh = 240;
+        const wh = 288; // Increased by 48 (1 line)
         const wx = 10;
-        const wy = 100;
+        const wy = 114;
         return new Rectangle(wx, wy, ww, wh);
     };
 
+    // Create System Window
+    Scene_Menu.prototype.createSystemWindow = function () {
+        const rect = this.systemWindowRect();
+        this._systemWindow = new Window_PaladinSystem(rect);
+        this._systemWindow.setHandler("save", this.commandSave.bind(this));
+        this._systemWindow.setHandler("load", this.commandLoad.bind(this));
+        this._systemWindow.setHandler("music", this.commandOptionsSystem.bind(this));
+        this._systemWindow.setHandler("sound", this.commandOptionsSystem.bind(this));
+        this._systemWindow.setHandler("gameEnd", this.commandGameEnd.bind(this));
+        this._systemWindow.setHandler("cancel", this.onSystemCancel.bind(this));
+        this._systemWindow.hide();
+        this.addWindow(this._systemWindow);
+    };
+
+    Scene_Menu.prototype.systemWindowRect = function () {
+        const ww = 296;
+        const wh = 348; // Increased by 48 (1 line)
+        const wx = 120;
+        const wy = 186;
+        return new Rectangle(wx, wy, ww, wh);
+    };
+
+    // Handle "System" command from main menu
+    Scene_Menu.prototype.commandOptions = function () {
+        this._commandWindow.deactivate();
+        this._commandWindow.refresh(); // Refresh to stop breathing effect
+        this._systemWindow.refresh();
+        this._systemWindow.show();
+        this._systemWindow.activate();
+    };
+
+    Scene_Menu.prototype.onSystemCancel = function () {
+        this._systemWindow.hide();
+        this._systemWindow.deactivate();
+        this._commandWindow.activate();
+        this._commandWindow.refresh(); // Refresh to resume breathing effect
+    };
+
+    Scene_Menu.prototype.commandSave = function () {
+        SceneManager.push(Scene_Save);
+    };
+
+    Scene_Menu.prototype.commandLoad = function () {
+        SceneManager.push(Scene_Load);
+    };
+
+    Scene_Menu.prototype.commandOptionsSystem = function () {
+        SceneManager.push(Scene_Options);
+    };
+
+    Scene_Menu.prototype.commandGameEnd = function () {
+        SceneManager.push(Scene_GameEnd);
+    };
+
+    //-----------------------------------------------------------------------------
+    // Window_PaladinGold
+    //-----------------------------------------------------------------------------
     //-----------------------------------------------------------------------------
     // Window_PaladinGold
     //-----------------------------------------------------------------------------
@@ -104,54 +158,63 @@
         this.initialize(...arguments);
     }
 
-    Window_PaladinGold.prototype = Object.create(Window_Gold.prototype);
+    // Inherit from Window_PaladinHorzBar if available, else fallback to Window_Gold (safety)
+    // But since we added it to palWindow.js which should be loaded, we assume it's there.
+    // If palWindow.js is ordered after, this might fail. 
+    // Usually plugins are loaded in order. palWindow.js is likely before or after.
+    // To be safe, we should check. But the user has them as separate files.
+    // The previous edit to palWindow.js put Window_PaladinHorzBar on window object.
+
+    // We will assume Window_PaladinHorzBar exists.
+    Window_PaladinGold.prototype = Object.create(Window_PaladinHorzBar.prototype);
     Window_PaladinGold.prototype.constructor = Window_PaladinGold;
 
     Window_PaladinGold.prototype.initialize = function (rect) {
-        this._backgroundImage = ImageManager.loadSystem("moneyUI");
+        // Remove moneyUI, use bar tiles from base
+        // Load number images
         this._numberImages = [];
         for (let i = 0; i < 10; i++) {
             this._numberImages.push(ImageManager.loadSystem("Data" + (919 + i)));
         }
-        Window_Gold.prototype.initialize.call(this, rect);
-        this.opacity = 255;
-        this.contentsOpacity = 255;
-        this.backOpacity = 0;
-        this.frameVisible = false;
+
+        Window_PaladinHorzBar.prototype.initialize.call(this, rect);
+        this.refresh();
+    };
+
+    Window_PaladinGold.prototype.value = function () {
+        return $gameParty.gold();
+    };
+
+    Window_PaladinGold.prototype.open = function () {
+        this.refresh();
+        Window_PaladinHorzBar.prototype.open.call(this);
     };
 
     Window_PaladinGold.prototype.refresh = function () {
-        const rect = this.itemLineRect(0);
-        const x = rect.x;
-        const y = rect.y;
-        const width = rect.width;
-
-        this.contents.clear();
-
-        // Check if all images are ready
-        let retry = false;
-        if (!this._backgroundImage.isReady()) {
-            this._backgroundImage.addLoadListener(this.refresh.bind(this));
-            retry = true;
+        // Wait for number images
+        if (this._numberImages.some(img => !img.isReady())) {
+            this._numberImages.forEach(img => {
+                if (!img.isReady()) {
+                    img.addLoadListener(this.refresh.bind(this));
+                }
+            });
+            return;
         }
-        this._numberImages.forEach(img => {
-            if (!img.isReady()) {
-                img.addLoadListener(this.refresh.bind(this));
-                retry = true;
-            }
-        });
-        if (retry) return;
+        // Base refresh handles bar tiles and calling drawContents
+        Window_PaladinHorzBar.prototype.refresh.call(this);
+    };
 
-        // Draw Background
-        const originalSmooth = this.contents.smooth;
-        this.contents.smooth = false;
-        this.contents.blt(this._backgroundImage, 0, 0, this._backgroundImage.width, this._backgroundImage.height, 0, 0, this.innerWidth, this.innerHeight);
+    Window_PaladinGold.prototype.drawContents = function () {
+        const width = this.innerWidth;
+        const height = this.innerHeight;
 
         // Draw "金钱" Label (Black)
+        // Position: x=30? Previous code was x + 30.
+        // Let's use specific coordinates to match previous look.
         this.contents.fontSize = 32;
         this.contents.textColor = "#000000";
         this.contents.outlineWidth = 0;
-        this.contents.drawText("金钱", x + 30, 0, 100, this.innerHeight, "left");
+        this.contents.drawText("金钱", 30, 0, 100, height, "left");
 
         // Draw Gold Number using Images
         const goldString = Math.abs(this.value()).toString();
@@ -166,16 +229,20 @@
         }
 
         let currentX = width - totalWidth - 30; // 30px padding from right
-        const numY = (this.innerHeight - (this._numberImages[0].height * 2)) / 2;
+        // Vertically center numbers?
+        // Previous: (this.innerHeight - (img.height * 2)) / 2
+        // Assuming all number images have same height
+        if (this._numberImages.length > 0 && this._numberImages[0]) {
+            const imgH = this._numberImages[0].height * 2;
+            const numY = (height - imgH) / 2;
 
-        for (let i = 0; i < goldString.length; i++) {
-            const digit = parseInt(goldString[i]);
-            const img = this._numberImages[digit];
-            this.contents.blt(img, 0, 0, img.width, img.height, currentX, numY, img.width * 2, img.height * 2);
-            currentX += (img.width * 2) + spacing;
+            for (let i = 0; i < goldString.length; i++) {
+                const digit = parseInt(goldString[i]);
+                const img = this._numberImages[digit];
+                this.contents.blt(img, 0, 0, img.width, img.height, currentX, numY, img.width * 2, img.height * 2);
+                currentX += (img.width * 2) + spacing;
+            }
         }
-
-        this.contents.smooth = originalSmooth;
     };
 
     //-----------------------------------------------------------------------------
@@ -185,12 +252,30 @@
         this.initialize(...arguments);
     }
 
-    Window_PaladinCommand.prototype = Object.create(Window_Command.prototype);
+    // Now inherits from Window_PaladinBase (defined in palWindow.js)
+    if (typeof Window_PaladinBase !== 'undefined') {
+        Window_PaladinCommand.prototype = Object.create(Window_PaladinBase.prototype);
+    } else {
+        // Fallback if palWindow.js is missing or loaded after
+        console.warn("Window_PaladinBase not found. Fallback to Window_Command.");
+        Window_PaladinCommand.prototype = Object.create(Window_Command.prototype);
+    }
     Window_PaladinCommand.prototype.constructor = Window_PaladinCommand;
 
     Window_PaladinCommand.prototype.initialize = function (rect) {
-        this._backgroundImage = ImageManager.loadSystem("systemUI");
-        Window_Command.prototype.initialize.call(this, rect);
+        // Load 9-slice tiles (Data90 - Data98)
+        this._bgTiles = [];
+        for (let i = 0; i < 9; i++) {
+            this._bgTiles.push(ImageManager.loadSystem("Data" + (90 + i)));
+        }
+
+        // Call super initialize
+        if (typeof Window_PaladinBase !== 'undefined') {
+            Window_PaladinBase.prototype.initialize.call(this, rect);
+        } else {
+            Window_Command.prototype.initialize.call(this, rect);
+        }
+
         this.padding = 0;
         this.opacity = 255;
         this.backOpacity = 0;
@@ -202,6 +287,10 @@
             this._bgSprite = new Sprite();
             this._container.addChildAt(this._bgSprite, 0);
         }
+
+        // Force refresh to ensure padding change is applied to contents size and layout
+        // (Fixes "Shifted Text" bug on second open)
+        this.refresh();
     };
 
     Window_PaladinCommand.prototype.makeCommandList = function () {
@@ -218,90 +307,166 @@
     const _Window_PaladinCommand_refresh = Window_PaladinCommand.prototype.refresh;
     Window_PaladinCommand.prototype.refresh = function () {
         // Safe check for bgSprite
-        if (!this._bgSprite && this._container) {
+        if (!this._bgSprite) {
             this._bgSprite = new Sprite();
             this._container.addChildAt(this._bgSprite, 0);
         }
 
-        if (this._backgroundImage.isReady() && this._bgSprite) {
-            const targetWidth = this._backgroundImage.width * 3;
-            const targetHeight = this._backgroundImage.height * 3;
+        // Check if all tiles are ready
+        const allReady = this._bgTiles.every(img => img.isReady());
+        // console.log("PaladinMenu: refresh. All tiles ready?", allReady, "bgSprite exists?", !!this._bgSprite);
 
-            if (this.width !== targetWidth || this.height !== targetHeight) {
-                this.move(this.x, this.y, targetWidth, targetHeight);
-                this.createContents();
+        if (allReady && this._bgSprite) {
+            const width = this.width;
+            const height = this.height;
+
+            if (!this._bgSprite.bitmap || this._bgSprite.bitmap.width !== width || this._bgSprite.bitmap.height !== height) {
+                this._bgSprite.bitmap = new Bitmap(width, height);
             }
 
-            this._bgSprite.bitmap = this._backgroundImage;
-            this._bgSprite.scale.x = 3;
-            this._bgSprite.scale.y = 3;
+            // Draw 9-slice background
+            // console.log("PaladinMenu: Drawing background. Size:", width, height);
+            this.drawPaladinBackground(this._bgSprite.bitmap);
 
-            if (this._bgSprite.texture && this._bgSprite.texture.baseTexture) {
-                this._bgSprite.texture.baseTexture.scaleMode = PIXI.SCALE_MODES.NEAREST;
-            }
+            // Reset scale (we are drawing 3x scaled already)
+            this._bgSprite.scale.x = 1;
+            this._bgSprite.scale.y = 1;
+
+            this.createContents();
         } else {
-            this._backgroundImage.addLoadListener(this.refresh.bind(this));
+            // Only add listener to images that are NOT ready to avoid immediate callback recursion
+            this._bgTiles.forEach(img => {
+                if (!img.isReady()) {
+                    img.addLoadListener(this.refresh.bind(this));
+                }
+            });
         }
 
         _Window_PaladinCommand_refresh.call(this);
     };
 
+    Window_PaladinCommand.prototype.drawPaladinBackground = function (bitmap) {
+        bitmap.clear();
+        const imgs = this._bgTiles;
+        const w = bitmap.width;
+        const h = bitmap.height;
+        const scale = 3;
+
+        // Tile Dimensions (Raw)
+        // 90: TL 22x20
+        // 91: T  16x20
+        // 92: TR 33x20
+        // 93: L  22x18
+        // 94: C  16x18
+        // 95: R  23x18
+        // 96: BL 22x20
+        // 97: B  16x20
+        // 98: BR 31x20
+
+        const tl = imgs[0]; const t = imgs[1]; const tr = imgs[2];
+        const l = imgs[3]; const c = imgs[4]; const r = imgs[5];
+        const bl = imgs[6]; const b = imgs[7]; const br = imgs[8];
+
+        // Scaled Dimensions
+        const tlW = 22 * scale; const tlH = 20 * scale;
+        const trW = 33 * scale; const trH = 20 * scale;
+        const blH = 20 * scale;
+        const blW = 22 * scale;
+        const brW = 31 * scale; const brH = 20 * scale;
+
+        const rW = 23 * scale;
+        const lW = 22 * scale;
+
+        // Calculate consistent margins based on widest elements to maintain vertical alignment columns
+        const marginLeft = Math.max(tlW, lW, blW);
+        const marginRight = Math.max(trW, rW, brW);
+
+        // 1. Corners
+        this.tileThreeTimes(bitmap, tl, 0, 0, tlW, tlH, "TL");
+        this.tileThreeTimes(bitmap, tr, w - marginRight, 0, trW, trH, "TR");
+        this.tileThreeTimes(bitmap, bl, 0, h - blH, blW, blH, "BL");
+        this.tileThreeTimes(bitmap, br, w - marginRight, h - brH, brW, brH, "BR");
+
+        // 2. Edges
+        // Top connects TL and TR
+        this.tileThreeTimes(bitmap, t, marginLeft, 0, w - marginLeft - marginRight, tlH, "Top");
+
+        // Bottom connects BL and BR
+        this.tileThreeTimes(bitmap, b, marginLeft, h - blH, w - marginLeft - marginRight, blH, "Bottom");
+
+        // Left Edge
+        this.tileThreeTimes(bitmap, l, 0, tlH, marginLeft, h - tlH - blH, "Left");
+
+        // Right Edge
+        // Align to the seam (w - marginRight). Draw ONLY its natural width (rW).
+        // This leaves the rest of the space (marginRight - rW) transparent.
+        this.tileThreeTimes(bitmap, r, w - marginRight, trH, rW, h - trH - brH, "Right");
+
+        // 3. Center
+        this.tileThreeTimes(bitmap, c, marginLeft, tlH, w - marginLeft - marginRight, h - tlH - blH, "Center");
+    };
+
+    Window_PaladinCommand.prototype.tileThreeTimes = function (bitmap, source, dx, dy, dw, dh) {
+        if (dw <= 0 || dh <= 0) return;
+
+        const scale = 3;
+        const tileW = source.width * scale;
+        const tileH = source.height * scale;
+
+        // Loop to fill destination rect
+        for (let y = 0; y < dh; y += tileH) {
+            for (let x = 0; x < dw; x += tileW) {
+                const drawW = Math.min(tileW, dw - x);
+                const drawH = Math.min(tileH, dh - y);
+
+                // Source clipping (handling partial tiles)
+                const sw = drawW / scale;
+                const sh = drawH / scale;
+
+                bitmap.blt(source, 0, 0, sw, sh, dx + x, dy + y, drawW, drawH);
+            }
+        }
+    };
+
     Window_PaladinCommand.prototype.itemRect = function (index) {
-        const rect = Window_Command.prototype.itemRect.call(this, index);
-        // Manual padding (Kept user's change)
+        // Use super call (which might be Window_PaladinBase or Window_Command)
+        let rect;
+        if (typeof Window_PaladinBase !== 'undefined') {
+            rect = Window_PaladinBase.prototype.itemRect.call(this, index);
+        } else {
+            rect = Window_Command.prototype.itemRect.call(this, index);
+        }
+
+        // Manual padding
         rect.x += -8;
         rect.width -= 20;
-        rect.y += 25;
+        rect.y += 36;
         return rect;
     };
 
-    Window_PaladinCommand.prototype.drawItem = function (index) {
-        const rect = this.itemLineRect(index);
-        const align = this.itemTextAlign();
+    // Removed drawItem and update (inherited from Window_PaladinBase)
 
-        // Clear previous drawing
-        this.contents.clearRect(rect.x, rect.y, rect.width, rect.height);
 
-        // Remove outline for standard text
-        this.contents.outlineWidth = 0;
+    //-----------------------------------------------------------------------------
+    // Window_PaladinSystem
+    //-----------------------------------------------------------------------------
+    function Window_PaladinSystem() {
+        this.initialize(...arguments);
+    }
 
-        const commandName = this.commandName(index);
-        this.changePaintOpacity(this.isCommandEnabled(index));
+    Window_PaladinSystem.prototype = Object.create(Window_PaladinCommand.prototype);
+    Window_PaladinSystem.prototype.constructor = Window_PaladinSystem;
 
-        // Coloring Logic
-        if (index === this.index()) {
-            // Breathing Effect
-            const colorIndex = Math.floor(Date.now() / 150) % selectedColors.length;
-            const color = selectedColors[colorIndex];
-
-            // 1. Draw Shadow (Black)
-            this.contents.textColor = '#000000';
-            this.contents.drawText(commandName, rect.x + 2, rect.y + 2, rect.width, this.lineHeight(), align);
-
-            // 2. Draw Main Text (Breathing Color)
-            this.contents.textColor = color;
-            this.contents.drawText(commandName, rect.x, rect.y, rect.width, this.lineHeight(), align);
-        } else {
-            // Standard Item
-            this.changeTextColor(ColorManager.normalColor());
-            // Standard outline logic applies here if using drawText from Window_Base, or we can manually draw shadow too if desired.
-            // For now, matching standard behavior for unselected.
-            // Actually, if we want consistency, we should probably add shadow to unselected too?
-            // "Standard" RPG Maker usually has an outline, not a drop shadow.
-            // But if selected has drop shadow, maybe unselected should too?
-            // User only mentioned "selected option" shadow is missing. Standard logic will likely draw outline.
-            // Let's stick to standard for unselected unless requested.
-            this.drawText(commandName, rect.x, rect.y, rect.width, align);
-        }
+    Window_PaladinSystem.prototype.makeCommandList = function () {
+        this.addCommand("储存进度", "save", this.isSaveEnabled());
+        this.addCommand("读取进度", "load", true);
+        this.addCommand("音乐", "music");
+        this.addCommand("音效", "sound");
+        this.addCommand("结束游戏", "gameEnd");
     };
 
-    Window_PaladinCommand.prototype.update = function () {
-        Window_Command.prototype.update.call(this);
-        if (this.visible && this.active) {
-            if (this.isOpen()) {
-                this.redrawItem(this.index());
-            }
-        }
+    Window_PaladinSystem.prototype.isSaveEnabled = function () {
+        return !DataManager.isEventTest() && $gameSystem.isSaveEnabled();
     };
 
 })();

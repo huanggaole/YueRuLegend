@@ -6,9 +6,9 @@
  * @help
  */
 
-(function() {
+(function () {
     // 重写标题场景，移除了选项菜单，仅保留新游戏和继续游戏选项。
-    Scene_Title.prototype.createCommandWindow = function() {
+    Scene_Title.prototype.createCommandWindow = function () {
         const background = $dataSystem.titleCommandWindow.background;
         const rect = this.commandWindowRect();
         this._commandWindow = new Window_TitleCommand(rect);
