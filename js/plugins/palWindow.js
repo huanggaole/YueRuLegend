@@ -511,6 +511,7 @@
         bitmap.clear();
 
         // Label
+        bitmap.fontFace = $gameSystem.mainFontFace();
         bitmap.fontSize = $gameSystem.mainFontSize();
         bitmap.textColor = "#000000";
         bitmap.outlineWidth = 0;
@@ -723,6 +724,7 @@
             labelColor = '#C4B8AC';
         }
 
+        bitmap.fontFace = $gameSystem.mainFontFace();
         bitmap.fontSize = $gameSystem.mainFontSize();
         bitmap.outlineWidth = 0;
 

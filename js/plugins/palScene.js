@@ -81,7 +81,7 @@
 
     Scene_Title.prototype._updateTitleLoadInput = function () {
         const N = this._TITLE_SLOT_COUNT;
-        if (Input.isTriggered('cancel') || Input.isTriggered('escape')) {
+        if (Input.isTriggered('cancel') || Input.isTriggered('escape') || TouchInput.isCancelled()) {
             SoundManager.playCancel();
             this._closeTitleLoadSlots();
             return;
@@ -436,7 +436,7 @@
         const ww = 250;
         const wh = 102;
         const gap = 8;
-        const wx = 500;
+        const wx = 600;
         // Stack from top of screen with a starting offset
         const startY = Math.floor((Graphics.boxHeight - (wh + gap) * SLOT_COUNT) / 2);
         const wy = startY + index * (wh + gap);
@@ -485,7 +485,7 @@
     };
 
     Scene_Menu.prototype._updateSaveSlotInput = function () {
-        if (Input.isTriggered('cancel') || Input.isTriggered('escape')) {
+        if (Input.isTriggered('cancel') || Input.isTriggered('escape') || TouchInput.isCancelled()) {
             SoundManager.playCancel();
             this._closeSaveSlots();
             return;
