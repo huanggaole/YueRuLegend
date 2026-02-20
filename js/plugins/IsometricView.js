@@ -103,7 +103,7 @@
     Tilemap.prototype.initialize = function () {
         _Tilemap_initialize.call(this);
         this._isometricEnabled = true;
-        this._margin = 250;
+        this._margin = 346;
     };
 
     // 重写瓦片层的创建以应用变换

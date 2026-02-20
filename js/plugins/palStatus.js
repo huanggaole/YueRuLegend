@@ -162,10 +162,10 @@
         if (!this._actor) return;
 
         this.drawBackground();
-        this.drawActorFaceGraphic();
         this.drawActorNameGraphic();
         this.drawStats();
         this.drawEquips();
+        this.drawActorFaceGraphic();
     };
 
     Window_PalStatus.prototype.drawBackground = function () {
@@ -372,12 +372,12 @@
 
         // Coordinates map (x, y)
         const mapping = [
-            { slotName: "Head", etypeId: 2, x: w - 150, y: 50 },
-            { slotName: "Cape", etypeId: 4, x: w - 100, y: 180 }, // Assuming etype 4
-            { slotName: "Body", etypeId: 3, x: w - 150, y: 300 },
-            { slotName: "Weapon", etypeId: 1, x: w - 250, y: 450 },
-            { slotName: "Foot", etypeId: 5, x: w / 2 + 50, y: 520 },
-            { slotName: "Accessory", etypeId: 6, x: w / 2 - 100, y: 520 }
+            { slotName: "Head", etypeId: 2, x: w - 386, y: -37, scale: 3 },
+            { slotName: "Cape", etypeId: 4, x: w - 212, y: 81, scale: 3 },
+            { slotName: "Body", etypeId: 3, x: w - 200, y: 266, scale: 3 },
+            { slotName: "Weapon", etypeId: 1, x: w - 348, y: 357, scale: 3 },
+            { slotName: "Foot", etypeId: 5, x: w - 530, y: 386, scale: 3 },
+            { slotName: "Accessory", etypeId: 6, x: w - 710, y: 338, scale: 3 }
         ];
 
         // Draw Icon + Name for each
@@ -398,17 +398,27 @@
         for (const map of mapping) {
             // Find item with this etypeId
             const item = equips.find(e => e && e.etypeId === map.etypeId);
-            this.drawEquipItem(item, map.x, map.y, map.slotName);
+            this.drawEquipItem(item, map.x, map.y, map.slotName, map.scale);
         }
     };
 
-    Window_PalStatus.prototype.drawEquipItem = function (item, x, y, label) {
+    Window_PalStatus.prototype.drawEquipItem = function (item, x, y, label, scale = 1) {
         if (item) {
-            // Draw Icon
-            this.drawIcon(item.iconIndex, x, y + 36);
+            // Draw Scaled Icon
+            const iconIndex = item.iconIndex;
+            const bitmap = ImageManager.loadSystem('IconSet');
+            const pw = ImageManager.iconWidth;
+            const ph = ImageManager.iconHeight;
+            const sx = (iconIndex % 16) * pw;
+            const sy = Math.floor(iconIndex / 16) * ph;
+            const dw = pw * scale;
+            const dh = ph * scale;
+
+            this.contents.blt(bitmap, sx, sy, pw, ph, x, y + 36, dw, dh);
+
             // Draw Name
-            this.contents.fontSize = 24;
-            this.drawTextWithShadow(item.name, x - 20, y, 120, 'center', '#E3DCC0');
+            this.contents.fontSize = 36;
+            this.drawTextWithShadow(item.name, x - 24, y + 160, 192, 'center', '#E3DCC0');
         }
         // Empty slot: draw nothing
     };
