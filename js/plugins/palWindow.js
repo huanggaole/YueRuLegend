@@ -775,4 +775,154 @@
 
     window.Window_PaladinSaveSlot = Window_PaladinSaveSlot;
 
+    //-----------------------------------------------------------------------------
+    // Window_PaladinPartyStatus
+    //-----------------------------------------------------------------------------
+    function Window_PaladinPartyStatus() {
+        this.initialize(...arguments);
+    }
+    Window_PaladinPartyStatus.prototype = Object.create(Window_Base.prototype);
+    Window_PaladinPartyStatus.prototype.constructor = Window_PaladinPartyStatus;
+
+    Window_PaladinPartyStatus.prototype.initialize = function (rect) {
+        Window_Base.prototype.initialize.call(this, rect);
+        this.opacity = 0; // transparent background/frame
+
+        this._listeningImages = new Set();
+        this._refreshListener = this.refresh.bind(this);
+        this._images = [];
+        this._images.push(ImageManager.loadSystem("Data918"));
+        this._images.push(ImageManager.loadSystem("Data939")); // slash
+        for (let i = 0; i < 10; i++) {
+            this._images.push(ImageManager.loadSystem("Data" + (919 + i))); // yellow digits
+            this._images.push(ImageManager.loadSystem("Data" + (956 + i))); // green digits
+        }
+
+        // Initialize sprite container for rendering without clipping
+        this._renderSprite = new Sprite();
+        this.addChild(this._renderSprite);
+    };
+
+    Window_PaladinPartyStatus.prototype.refresh = function () {
+        const members = $gameParty.battleMembers();
+
+        if (this._images.some(img => !img.isReady())) {
+            this._images.forEach(img => {
+                if (!img.isReady() && !this._listeningImages.has(img)) {
+                    img.addLoadListener(this._refreshListener);
+                    this._listeningImages.add(img);
+                }
+            });
+            return;
+        }
+
+        let facesReady = true;
+        for (const actor of members) {
+            const faceImg = ImageManager.loadSystem("actor" + actor.actorId());
+            if (!faceImg.isReady()) {
+                facesReady = false;
+                if (!this._listeningImages.has(faceImg)) {
+                    faceImg.addLoadListener(this._refreshListener);
+                    this._listeningImages.add(faceImg);
+                }
+            }
+        }
+        if (!facesReady) return;
+
+        if (!this._renderSprite.bitmap || this._renderSprite.bitmap.width !== this.width || this._renderSprite.bitmap.height !== this.height) {
+            this._renderSprite.bitmap = new Bitmap(this.width, this.height);
+        }
+        const bitmap = this._renderSprite.bitmap;
+        bitmap.clear();
+
+        const scale = 3;
+        const bgImg = ImageManager.loadSystem("Data918");
+        const boxW = bgImg.width * scale;
+        const gap = 8;
+        const totalW = members.length * boxW + (members.length - 1) * gap;
+        let startX = (this.width - totalW) / 2;
+        if (startX < 0) startX = 0;
+
+        for (let i = 0; i < members.length; i++) {
+            this.drawActorStatus(bitmap, members[i], startX + i * (boxW + gap), 0, scale);
+        }
+    };
+
+    Window_PaladinPartyStatus.prototype.drawActorStatus = function (bitmap, actor, x, y, scale) {
+        // Draw background
+        const bgImg = ImageManager.loadSystem("Data918");
+        bitmap.blt(bgImg, 0, 0, bgImg.width, bgImg.height, x + 2 * scale, y + 3 * scale, bgImg.width * scale, bgImg.height * scale);
+
+        // Draw face
+        const faceImg = ImageManager.loadSystem("actor" + actor.actorId());
+        const fx = x;
+        const fy = y;
+        bitmap.blt(faceImg, 0, 0, faceImg.width, faceImg.height, fx, fy, faceImg.width * scale, faceImg.height * scale);
+
+        // HP
+        const hpStr = (Math.floor(actor.hp) < 100 ? " " : "") + Math.floor(actor.hp) + "/" + Math.floor(actor.mhp);
+        // MP
+        const mpStr = (Math.floor(actor.mp) < 100 ? " " : "") + Math.floor(actor.mp) + "/" + Math.floor(actor.mmp);
+
+        const numX = x + 34 * scale;
+        const hpY = y + 10 * scale;
+        const mpY = y + 25 * scale;
+
+        this.drawDigits(bitmap, hpStr, numX, hpY, scale, 919); // yellow
+        this.drawDigits(bitmap, mpStr, numX, mpY, scale, 956); // green
+    };
+
+    Window_PaladinPartyStatus.prototype.drawDigits = function (bitmap, str, x, y, scale, baseDataId) {
+        let curX = x;
+        const spacing = 0;
+        let offsetY = 0;
+        for (let i = 0; i < str.length; i++) {
+            const char = str[i];
+            if (char === " ") {
+                curX += 6 * scale;
+                continue;
+            } else if (char === "/") {
+                const img = ImageManager.loadSystem("Data939");
+                offsetY = scale;
+                bitmap.blt(img, 0, 0, img.width, img.height, curX - offsetY, y + offsetY, img.width * scale, img.height * scale);
+                offsetY = 2 * scale;
+                curX += img.width * scale + spacing;
+            } else {
+                const digit = parseInt(char);
+                if (!isNaN(digit)) {
+                    const img = ImageManager.loadSystem("Data" + (baseDataId + digit));
+                    if (img && img.isReady()) {
+                        bitmap.blt(img, 0, 0, img.width, img.height, curX - offsetY, y + offsetY, img.width * scale, img.height * scale);
+                        curX += (6 * scale) + spacing;
+                    }
+                }
+            }
+        }
+    };
+
+    window.Window_PaladinPartyStatus = Window_PaladinPartyStatus;
+
+    //-----------------------------------------------------------------------------
+    // Window_PaladinMagicActor
+    //-----------------------------------------------------------------------------
+    function Window_PaladinMagicActor() {
+        this.initialize(...arguments);
+    }
+    Window_PaladinMagicActor.prototype = Object.create(Window_PaladinCommand.prototype);
+    Window_PaladinMagicActor.prototype.constructor = Window_PaladinMagicActor;
+
+    Window_PaladinMagicActor.prototype.initialize = function (rect) {
+        Window_PaladinCommand.prototype.initialize.call(this, rect);
+    };
+
+    Window_PaladinMagicActor.prototype.makeCommandList = function () {
+        const members = $gameParty.members();
+        for (let i = 0; i < members.length; i++) {
+            const actor = members[i];
+            this.addCommand(actor.name(), "actor", actor.isAlive(), actor.actorId());
+        }
+    };
+
+    window.Window_PaladinMagicActor = Window_PaladinMagicActor;
+
 })();

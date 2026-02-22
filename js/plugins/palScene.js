@@ -309,6 +309,10 @@
         this.createMusicToggleWindow();
         this.createSoundToggleWindow();
         this.createSaveSlotWindows();
+
+        // Add new Paladin sub-windows here
+        this.createPartyStatusWindow();
+        this.createMagicActorWindow();
     };
 
     // Overrides to avoid crash if status window is missing
@@ -317,8 +321,18 @@
     };
 
     Scene_Menu.prototype.commandPersonal = function () {
-        console.log("Status Window is missing. Cannot select actor.");
-        this._commandWindow.activate();
+        if (this._commandWindow.currentSymbol() === 'skill') {
+            this._commandWindow.deactivate();
+            this._commandWindow.refresh(); // Stop breathing
+            this._partyStatusWindow.show();
+            this._magicActorWindow.refresh();
+            this._magicActorWindow.show();
+            this._magicActorWindow.activate();
+            this._magicActorWindow.select(0);
+        } else {
+            console.log("Status Window is missing. Cannot select actor.");
+            this._commandWindow.activate();
+        }
     };
 
     // Gold Window
@@ -699,5 +713,53 @@
         this._systemWindow.activate();
     };
 
+
+    //-----------------------------------------------------------------------------
+    // Magic Character Selection Hooks (Scene_Menu)
+    //-----------------------------------------------------------------------------
+    Scene_Menu.prototype.createMagicActorWindow = function () {
+        const members = $gameParty.members();
+        const wh = 36 + 48 + members.length * 48; // 9-slice top(36) + bottom(20) + lines
+        const ww = 240;
+        const cRect = this.commandWindowRect();
+        const wx = cRect.x + cRect.width - 100;
+        const wy = cRect.y + 72;
+
+        const rect = new Rectangle(wx, wy, ww, wh);
+        this._magicActorWindow = new Window_PaladinMagicActor(rect);
+        this._magicActorWindow.setHandler("actor", this.onMagicActorOk.bind(this));
+        this._magicActorWindow.setHandler("cancel", this.onMagicActorCancel.bind(this));
+        this._magicActorWindow.hide();
+        this.addWindow(this._magicActorWindow);
+    };
+
+    Scene_Menu.prototype.onMagicActorOk = function () {
+        SoundManager.playOk();
+        // Magic scene not yet implemented, pre-allocating the hook here.
+        // SceneManager.push(Scene_PalMagic);
+
+        // Keep active for testing until implemented
+        this._magicActorWindow.activate();
+    };
+
+    Scene_Menu.prototype.onMagicActorCancel = function () {
+        this._magicActorWindow.hide();
+        this._partyStatusWindow.hide();
+        this._magicActorWindow.deactivate();
+        this._commandWindow.activate();
+        this._commandWindow.refresh(); // Resume breathing
+    };
+
+    Scene_Menu.prototype.createPartyStatusWindow = function () {
+        const wh = 114; // Height to fit Data918 properly (35 * 3 = 105 px + padding 9)
+        const ww = Graphics.boxWidth;
+        const wx = 0;
+        const wy = Graphics.boxHeight - wh;
+        const rect = new Rectangle(wx, wy, ww, wh);
+        this._partyStatusWindow = new Window_PaladinPartyStatus(rect);
+        this._partyStatusWindow.hide();
+        this.addWindow(this._partyStatusWindow);
+        this._partyStatusWindow.refresh();
+    };
 
 })();

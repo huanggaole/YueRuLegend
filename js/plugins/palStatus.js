@@ -56,10 +56,14 @@
     // Override standard "Status" command behavior
     const _Scene_Menu_commandPersonal = Scene_Menu.prototype.commandPersonal;
     Scene_Menu.prototype.commandPersonal = function () {
-        // If we are using the new Paladin Status scene
-        // Skip actor selection and go directly to first actor
-        this._commandWindow.deactivate(); // Prevent input on command window
-        SceneManager.push(Scene_PalStatus);
+        if (this._commandWindow.currentSymbol() === 'status') {
+            // If we are using the new Paladin Status scene
+            // Skip actor selection and go directly to first actor
+            this._commandWindow.deactivate(); // Prevent input on command window
+            SceneManager.push(Scene_PalStatus);
+        } else {
+            _Scene_Menu_commandPersonal.call(this);
+        }
     };
 
     //-----------------------------------------------------------------------------
