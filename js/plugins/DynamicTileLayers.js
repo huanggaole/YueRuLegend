@@ -1,6 +1,13 @@
 /*:
  * @target MZ
  * @plugindesc High-layer tiles as Sprites for correct Isometric Occlusion z-sorting.
+ * 
+ * @param showDebug
+ * @text Show Debug Heights
+ * @desc Set to true to see height numbers rendered above tiles.
+ * @type boolean
+ * @default false
+ * 
  * @help
  * Replaces pure layer-based rendering for "High" tiles (flagged with 4 bits height)
  * with Sprite-based rendering.
@@ -13,6 +20,8 @@
  * 从而利用RMMZ内置的Z-sort（根据Y坐标排序）实现正确的斜45度遮挡关系。
  */
 
+const DTL_params = PluginManager.parameters('DynamicTileLayers');
+
 // Define Sprite_DynamicTile class
 function Sprite_DynamicTile() {
     this.initialize(...arguments);
@@ -21,7 +30,7 @@ function Sprite_DynamicTile() {
 Sprite_DynamicTile.prototype = Object.create(Sprite.prototype);
 Sprite_DynamicTile.prototype.constructor = Sprite_DynamicTile;
 
-Sprite_DynamicTile.SHOW_DEBUG = false; // Performance Switch: Set true to see height numbers
+Sprite_DynamicTile.SHOW_DEBUG = String(DTL_params['showDebug']).toLowerCase() === 'true'; // Performance Switch: Set true to see height numbers
 
 Sprite_DynamicTile.prototype.initialize = function (tileId, mx, my, bias, height) {
     Sprite.prototype.initialize.call(this);
@@ -156,6 +165,7 @@ Sprite_DynamicTile.prototype.updatePosition = function () {
     // Game_Character screenY is (y+1)*th - shiftY (usually 6).
     // If Solid (Wall), Bias = 0. SortY = Bottom. (> Char Bottom-6). Object Covers Char.
     // If Passable (Ground), Bias = 48. SortY = Top. (<< Char Bottom-6). Char Covers Ground.
+    this._sortX = this.x + tw / 2;
     this._sortY = this.y - this._sortBias;
 };
 
@@ -286,6 +296,7 @@ Sprite.prototype.initialize = function () {
     _Sprite_initialize.apply(this, arguments);
     this.spriteId = _globalSpriteIdCounter++;
     this._sortY = undefined; // Initialize sortY
+    this._sortX = undefined; // Initialize sortX
 };
 
 Tilemap.prototype._addDynamicTile = function (tileId, mx, my, flag) {
@@ -318,8 +329,25 @@ Tilemap.prototype._compareChildOrder = function (a, b) {
     const aY = (a._sortY !== undefined) ? a._sortY : a.y;
     const bY = (b._sortY !== undefined) ? b._sortY : b.y;
 
-    if (aY !== bY) {
-        return aY - bY;
+    let aDepth = aY;
+    let bDepth = bY;
+
+    if (this._isometricEnabled) {
+        // Only apply the strict X+Y pseudo-isometric depth algorithm 
+        // to character VS character sorting (fixes party follower overlapping). 
+        // Map Tiles often rely on orthodox Y-sorting for their specific assets.
+        const isCharA = !!a._character;
+        const isCharB = !!b._character;
+        // if (isCharA && isCharB) {
+        const aX = (a._sortX !== undefined) ? a._sortX : a.x;
+        const bX = (b._sortX !== undefined) ? b._sortX : b.x;
+        aDepth = aX + aY;
+        bDepth = bX + bY;
+        // }
+    }
+
+    if (aDepth !== bDepth) {
+        return aDepth - bDepth;
     }
 
     // Stable sort using unique spriteId

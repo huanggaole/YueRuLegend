@@ -4,8 +4,8 @@ var $plugins =
 [
 {"name":"palWindow","status":true,"description":"","parameters":{}},
 {"name":"palScene","status":true,"description":"重写标题场景，仅保留新游戏与继续游戏选项。","parameters":{}},
-{"name":"IsometricView","status":true,"description":"v1.0.2 等距投影插件 - 将RMMZ默认正交投影修改为斜45度投影","parameters":{"transformA":"1","transformB":"-1","transformC":"320.00","transformD":"0.5","transformE":"0.5","transformF":"0","centeringOffsetX":"0","centeringOffsetY":"0"}},
-{"name":"DynamicTileLayers","status":true,"description":"动态层级瓦片系统，根据瓦片高度标志(flag)调整瓦片与角色的层级关系","parameters":{"TileHeightOffset":"0","CharacterHeightOffset":"0"}},
+{"name":"IsometricView","status":true,"description":"v1.0.2 等距投影插件 - 将RMMZ默认正交投影修改为斜45度投影","parameters":{"transformA":"1","transformB":"-1","transformC":"320.00","transformD":"0.5","transformE":"0.5","transformF":"0"}},
+{"name":"DynamicTileLayers","status":true,"description":"High-layer tiles as Sprites for correct Isometric Occlusion z-sorting.","parameters":{"showDebug":"false"}},
 {"name":"palStatus","status":true,"description":"[v1.0] 仿仙剑98柔情版状态界面","parameters":{}},
 {"name":"Pal_Icon48","status":true,"description":"Paladin 48x48 Icon Support","parameters":{"IconSetFilename":"IconSet48","IconSize":"48"}}
 ];
