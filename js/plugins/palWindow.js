@@ -925,4 +925,24 @@
 
     window.Window_PaladinMagicActor = Window_PaladinMagicActor;
 
+    //-----------------------------------------------------------------------------
+    // Window_PaladinItemCategory
+    //-----------------------------------------------------------------------------
+    function Window_PaladinItemCategory() {
+        this.initialize(...arguments);
+    }
+    Window_PaladinItemCategory.prototype = Object.create(Window_PaladinCommand.prototype);
+    Window_PaladinItemCategory.prototype.constructor = Window_PaladinItemCategory;
+
+    Window_PaladinItemCategory.prototype.initialize = function (rect) {
+        Window_PaladinCommand.prototype.initialize.call(this, rect);
+    };
+
+    Window_PaladinItemCategory.prototype.makeCommandList = function () {
+        this.addCommand("使用", "useItem");
+        this.addCommand("装备", "equipItem");
+    };
+
+    window.Window_PaladinItemCategory = Window_PaladinItemCategory;
+
 })();

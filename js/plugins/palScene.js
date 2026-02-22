@@ -313,6 +313,7 @@
         // Add new Paladin sub-windows here
         this.createPartyStatusWindow();
         this.createMagicActorWindow();
+        this.createItemCategoryWindow();
     };
 
     // Overrides to avoid crash if status window is missing
@@ -369,6 +370,16 @@
         const wx = 10;
         const wy = 114;
         return new Rectangle(wx, wy, ww, wh);
+    };
+
+    // Item
+    Scene_Menu.prototype.commandItem = function () {
+        this._commandWindow.deactivate();
+        this._commandWindow.refresh(); // Stop breathing
+        this._itemCategoryWindow.refresh();
+        this._itemCategoryWindow.show();
+        this._itemCategoryWindow.activate();
+        this._itemCategoryWindow.select(0);
     };
 
     // System Window
@@ -746,6 +757,43 @@
         this._magicActorWindow.hide();
         this._partyStatusWindow.hide();
         this._magicActorWindow.deactivate();
+        this._commandWindow.activate();
+        this._commandWindow.refresh(); // Resume breathing
+    };
+
+    //-----------------------------------------------------------------------------
+    // Item Category Selection Logic
+    //-----------------------------------------------------------------------------
+    Scene_Menu.prototype.createItemCategoryWindow = function () {
+        // Height formula: 9-slice top(36) + bottom(48) + 2 options * 48
+        const wh = 84 + 2 * 48;
+        const ww = 200;
+        const cRect = this.commandWindowRect();
+        const wx = cRect.x + cRect.width - 100;
+        const wy = cRect.y + 72;
+
+        const rect = new Rectangle(wx, wy, ww, wh);
+        this._itemCategoryWindow = new Window_PaladinItemCategory(rect);
+        this._itemCategoryWindow.setHandler("useItem", this.onItemCategoryOk.bind(this, 'use'));
+        this._itemCategoryWindow.setHandler("equipItem", this.onItemCategoryOk.bind(this, 'equip'));
+        this._itemCategoryWindow.setHandler("cancel", this.onItemCategoryCancel.bind(this));
+        this._itemCategoryWindow.hide();
+        this.addWindow(this._itemCategoryWindow);
+    };
+
+    Scene_Menu.prototype.onItemCategoryOk = function (category) {
+        SoundManager.playOk();
+        // Item scene override not yet fully implemented.
+        // We will pass the category ('use' or 'equip') to it later.
+        console.log("Selected Item Category:", category);
+
+        // Keep active for testing until implemented
+        this._itemCategoryWindow.activate();
+    };
+
+    Scene_Menu.prototype.onItemCategoryCancel = function () {
+        this._itemCategoryWindow.hide();
+        this._itemCategoryWindow.deactivate();
         this._commandWindow.activate();
         this._commandWindow.refresh(); // Resume breathing
     };
