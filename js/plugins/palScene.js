@@ -783,12 +783,8 @@
 
     Scene_Menu.prototype.onItemCategoryOk = function (category) {
         SoundManager.playOk();
-        // Item scene override not yet fully implemented.
-        // We will pass the category ('use' or 'equip') to it later.
-        console.log("Selected Item Category:", category);
-
-        // Keep active for testing until implemented
-        this._itemCategoryWindow.activate();
+        SceneManager.push(Scene_PaladinItem);
+        SceneManager.prepareNextScene(category);
     };
 
     Scene_Menu.prototype.onItemCategoryCancel = function () {

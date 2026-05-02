@@ -840,7 +840,7 @@
         const boxW = bgImg.width * scale;
         const gap = 8;
         const totalW = members.length * boxW + (members.length - 1) * gap;
-        let startX = (this.width - totalW) / 2;
+        let startX = 126; //(this.width - totalW) / 2;
         if (startX < 0) startX = 0;
 
         for (let i = 0; i < members.length; i++) {

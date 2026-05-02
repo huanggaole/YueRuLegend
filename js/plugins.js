@@ -7,5 +7,6 @@ var $plugins =
 {"name":"IsometricView","status":true,"description":"v1.0.2 等距投影插件 - 将RMMZ默认正交投影修改为斜45度投影","parameters":{"transformA":"1","transformB":"-1","transformC":"320.00","transformD":"0.5","transformE":"0.5","transformF":"0"}},
 {"name":"DynamicTileLayers","status":true,"description":"High-layer tiles as Sprites for correct Isometric Occlusion z-sorting.","parameters":{"showDebug":"false"}},
 {"name":"palStatus","status":true,"description":"[v1.0] 仿仙剑98柔情版状态界面","parameters":{}},
-{"name":"Pal_Icon48","status":true,"description":"Paladin 48x48 Icon Support","parameters":{"IconSetFilename":"IconSet48","IconSize":"48"}}
+{"name":"Pal_Icon48","status":true,"description":"Paladin 48x48 Icon Support","parameters":{"IconSetFilename":"IconSet48","IconSize":"48"}},
+{"name":"palItemList","status":true,"description":"Chinese Paladin Item List UI","parameters":{}}
 ];
