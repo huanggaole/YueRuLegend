@@ -393,7 +393,8 @@
         this._systemWindow.setHandler("gameEnd", this.commandGameEnd.bind(this));
         this._systemWindow.setHandler("cancel", this.onSystemCancel.bind(this));
         this._systemWindow.hide();
-        this.addWindow(this._systemWindow);
+        // Add as scene child (not in WindowLayer) to avoid stencil clipping
+        this.addChild(this._systemWindow);
     };
 
     Scene_Menu.prototype.systemWindowRect = function () {
@@ -741,7 +742,8 @@
         this._magicActorWindow.setHandler("actor", this.onMagicActorOk.bind(this));
         this._magicActorWindow.setHandler("cancel", this.onMagicActorCancel.bind(this));
         this._magicActorWindow.hide();
-        this.addWindow(this._magicActorWindow);
+        // Add as scene child (not in WindowLayer) to avoid stencil clipping
+        this.addChild(this._magicActorWindow);
     };
 
     Scene_Menu.prototype.onMagicActorOk = function () {
@@ -778,7 +780,8 @@
         this._itemCategoryWindow.setHandler("equipItem", this.onItemCategoryOk.bind(this, 'equip'));
         this._itemCategoryWindow.setHandler("cancel", this.onItemCategoryCancel.bind(this));
         this._itemCategoryWindow.hide();
-        this.addWindow(this._itemCategoryWindow);
+        // Add as scene child (not in WindowLayer) to avoid stencil clipping
+        this.addChild(this._itemCategoryWindow);
     };
 
     Scene_Menu.prototype.onItemCategoryOk = function (category) {
