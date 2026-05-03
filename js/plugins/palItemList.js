@@ -867,7 +867,432 @@
     };
 
     //-----------------------------------------------------------------------------
+    // Window_PalEquipActor
+    //-----------------------------------------------------------------------------
+    function Window_PalEquipActor() {
+        this.initialize(...arguments);
+    }
+    Window_PalEquipActor.prototype = Object.create(Window_MenuActor.prototype);
+    Window_PalEquipActor.prototype.constructor = Window_PalEquipActor;
+
+    Window_PalEquipActor.prototype.initialize = function (rect) {
+        // Left side actor list background tiles
+        this._bgTiles = [];
+        this._bgTiles.push(ImageManager.loadSystem("Data90"));  // 0: TL
+        this._bgTiles.push(ImageManager.loadSystem("Data91"));  // 1: T
+        this._bgTiles.push(ImageManager.loadSystem("Data92"));  // 2: TR
+        this._bgTiles.push(ImageManager.loadSystem("Data93"));  // 3: L
+        this._bgTiles.push(ImageManager.loadSystem("Data94"));  // 4: C
+        this._bgTiles.push(ImageManager.loadSystem("Data95"));  // 5: R
+        this._bgTiles.push(ImageManager.loadSystem("Data96"));  // 6: BL
+        this._bgTiles.push(ImageManager.loadSystem("Data97"));  // 7: B
+        this._bgTiles.push(ImageManager.loadSystem("Data98"));  // 8: BR
+
+        // Attribute value digits
+        this._digitAttr = [];
+        for (let i = 0; i < 10; i++) {
+            this._digitAttr.push(ImageManager.loadSystem("Data" + (956 + i)));
+        }
+
+        // Quantity digits
+        this._digitQuantity = [];
+        for (let i = 0; i < 10; i++) {
+            this._digitQuantity.push(ImageManager.loadSystem("Data" + (956 + i)));
+        }
+
+        this._iconBg = ImageManager.loadSystem("Data970");
+        this._bgImage = ImageManager.loadSystem("Fbp_2-1");
+
+        this._listeningImages = new Set();
+        this._refreshListener = this._drawCustomBackground.bind(this);
+
+        this._bgSprite = new Sprite();
+
+        Window_MenuActor.prototype.initialize.call(this, rect);
+
+        this.opacity = 255;
+        this.backOpacity = 0;
+        this.frameVisible = false;
+
+        const container = this._container || this;
+        container.addChildAt(this._bgSprite, 0);
+
+        this._item = null;
+        this._drawCustomBackground();
+    };
+
+    Window_PalEquipActor.prototype.setItem = function (item) {
+        this._item = item;
+        this.refresh();
+    };
+
+    Window_PalEquipActor.prototype._drawCustomBackground = function () {
+        if (!this._bgImage.isReady() || this._bgTiles.some(img => !img.isReady())) {
+            if (!this._bgImage.isReady() && !this._listeningImages.has(this._bgImage)) {
+                this._bgImage.addLoadListener(this._refreshListener);
+                this._listeningImages.add(this._bgImage);
+            }
+            this._bgTiles.forEach(img => {
+                if (!img.isReady() && !this._listeningImages.has(img)) {
+                    img.addLoadListener(this._refreshListener);
+                    this._listeningImages.add(img);
+                }
+            });
+            return;
+        }
+
+        const width = this.width;
+        const height = this.height;
+
+        if (!this._bgSprite.bitmap || this._bgSprite.bitmap.width !== width || this._bgSprite.bitmap.height !== height) {
+            this._bgSprite.bitmap = new Bitmap(width, height);
+        }
+
+        const bitmap = this._bgSprite.bitmap;
+        bitmap.clear();
+
+        const scale = 3;
+
+        // 1. Draw Fullscreen Background (tiled)
+        const bgImgW = this._bgImage.width * scale;
+        const bgImgH = this._bgImage.height * scale;
+        for (let y = 0; y < height; y += bgImgH) {
+            for (let x = 0; x < width; x += bgImgW) {
+                const drawW = Math.min(bgImgW, width - x);
+                const drawH = Math.min(bgImgH, height - y);
+                bitmap.blt(this._bgImage, 0, 0, drawW / scale, drawH / scale, x, y, drawW, drawH);
+            }
+        }
+
+        // 2. Draw Actor List Background (left side)
+        const imgs = this._bgTiles;
+        const tl = imgs[0]; const t = imgs[1]; const tr = imgs[2];
+        const l = imgs[3]; const c = imgs[4]; const r = imgs[5];
+        const bl = imgs[6]; const b = imgs[7]; const br = imgs[8];
+
+        const tlW = tl.width * scale; const tlH = tl.height * scale;
+        const trW = tr.width * scale; const trH = tr.height * scale;
+        const blH = bl.height * scale; const blW = bl.width * scale;
+        const brW = br.width * scale; const brH = br.height * scale;
+        const rW = r.width * scale; const lW = l.width * scale;
+        const tH = t.height * scale; const bH = b.height * scale;
+
+        const marginLeft = Math.max(tlW, lW, blW);
+        const marginRight = Math.max(trW, rW, brW);
+        const marginTop = Math.max(tlH, tH, trH);
+        const marginBottom = Math.max(blH, bH, brH);
+
+        // Calculate actor list rect
+        const listX = 10;
+        const listY = 280;
+        const listW = 260;
+        const listH = 220;
+
+        // Draw 9-slice
+        // Center
+        this._tileArea(bitmap, c, listX + marginLeft, listY + marginTop, listW - marginLeft - marginRight, listH - marginTop - marginBottom, scale);
+        // Edges
+        this._tileArea(bitmap, t, listX + marginLeft, listY, listW - marginLeft - marginRight, tH, scale); // Top
+        this._tileArea(bitmap, b, listX + marginLeft, listY + listH - bH, listW - marginLeft - marginRight, bH, scale); // Bottom
+        this._tileArea(bitmap, l, listX, listY + marginTop, lW, listH - marginTop - marginBottom, scale); // Left
+        this._tileArea(bitmap, r, listX + listW - trW, listY + marginTop, rW, listH - marginTop - marginBottom, scale); // Right
+        // Corners
+        this._tileArea(bitmap, tl, listX, listY, tlW, tlH, scale);
+        this._tileArea(bitmap, tr, listX + listW - trW, listY, trW, trH, scale);
+        this._tileArea(bitmap, bl, listX, listY + listH - blH, blW, blH, scale);
+        this._tileArea(bitmap, br, listX + listW - trW, listY + listH - brH, brW, brH, scale);
+    };
+
+    Window_PalEquipActor.prototype._tileArea = function (bitmap, source, dx, dy, dw, dh, scale) {
+        if (dw <= 0 || dh <= 0) return;
+        const tileW = source.width * scale;
+        const tileH = source.height * scale;
+
+        for (let y = 0; y < dh; y += tileH) {
+            for (let x = 0; x < dw; x += tileW) {
+                const drawW = Math.min(tileW, dw - x);
+                const drawH = Math.min(tileH, dh - y);
+                const sw = drawW / scale;
+                const sh = drawH / scale;
+                bitmap.blt(source, 0, 0, sw, sh, dx + x, dy + y, drawW, drawH);
+            }
+        }
+    };
+
+    Window_PalEquipActor.prototype.drawItemBackground = function (index) {
+        // Do nothing
+    };
+
+    Window_PalEquipActor.prototype.maxCols = function () {
+        return 1;
+    };
+
+    Window_PalEquipActor.prototype.lineHeight = function () {
+        return 48;
+    };
+
+    Window_PalEquipActor.prototype.itemHeight = function () {
+        return 48;
+    };
+
+    Window_PalEquipActor.prototype.itemRect = function (index) {
+        const rect = Window_MenuActor.prototype.itemRect.call(this, index);
+        rect.width = 200;
+        rect.x = 40;
+        rect.y += 310;
+        return rect;
+    };
+
+    Window_PalEquipActor.prototype.drawItem = function (index) {
+        const actor = this.actor(index);
+        if (!actor) return;
+
+        const rect = this.itemLineRect(index);
+        this.contents.clearRect(rect.x, rect.y, rect.width, rect.height);
+
+        const isSelected = (index === this.index());
+        // Check if actor can equip the current item
+        const canEquip = this._item ? actor.canEquip(this._item) : false;
+
+        let textColor = '#C4B8AC'; // Default Normal
+        if (!canEquip && !isSelected) textColor = '#CF6A5A'; // Disabled Unselected
+        if (!canEquip && isSelected) textColor = '#FCAC9C'; // Disabled Selected
+        if (canEquip && isSelected) {
+            let colorIndex = 0;
+            if (this.active) {
+                colorIndex = Math.floor(Date.now() / 150) % selectedColors.length;
+            }
+            textColor = selectedColors[colorIndex];
+        }
+
+        this.contents.outlineWidth = 0;
+        this.contents.fontSize = 42;
+
+        // Shadow
+        this.contents.textColor = '#000000';
+        this.contents.drawText(actor.name(), rect.x + 2, rect.y + 2, rect.width, this.lineHeight());
+
+        // Name
+        this.contents.textColor = textColor;
+        this.contents.drawText(actor.name(), rect.x, rect.y, rect.width, this.lineHeight());
+    };
+
+    Window_PalEquipActor.prototype.update = function () {
+        Window_MenuActor.prototype.update.call(this);
+        if (this.visible && this.active && this.isOpen()) {
+            if (this.index() >= 0) {
+                this.redrawItem(this.index());
+                this._drawEquipmentAndStats(this.actor(this.index()));
+            }
+        }
+    };
+
+    Window_PalEquipActor.prototype.select = function (index) {
+        const lastIndex = this.index();
+        Window_MenuActor.prototype.select.call(this, index);
+        if (lastIndex >= 0 && lastIndex !== this.index()) {
+            this.redrawItem(lastIndex);
+        }
+        if (this.index() >= 0) {
+            this.redrawItem(this.index());
+        }
+        this.refreshStatsArea();
+    };
+
+    Window_PalEquipActor.prototype.refreshStatsArea = function () {
+        if (!this.contents) return;
+        const actor = this.actor(this.index());
+        if (actor) {
+            this._drawEquipmentAndStats(actor);
+        }
+    };
+
+    Window_PalEquipActor.prototype.refresh = function () {
+        Window_MenuActor.prototype.refresh.call(this);
+        this.refreshStatsArea();
+    };
+
+    Window_PalEquipActor.prototype._drawEquipmentAndStats = function (actor) {
+        if (!actor) return;
+
+        // Clear everything except actor list area
+        this.contents.clearRect(0, 0, this.contents.width, 280); // Top area
+        this.contents.clearRect(280, 0, this.contents.width - 280, this.contents.height); // Right area
+
+        this.contents.outlineWidth = 0;
+        this.contents.fontSize = 42;
+
+        // --- 1. Draw Item Info (Top Left) ---
+        this._drawItemInfo();
+
+        // Check if we can preview stats with the new item
+        const canEquip = this._item && actor.canEquip(this._item);
+
+        // --- 2. Draw Equipped Items (Center) ---
+        // Slots: 1:Head(头戴), 3:Cape(披挂), 2:Body(身穿), 0:Weapon(手持), 4:foot(脚穿), 5:Accessory(配带)
+        // Note: RMMZ equipSlots(): 1=Weapon, 2=Head, 3=Body, 4=Cape, 5=foot, 6=Accessory
+        const slotOrder = [2, 4, 3, 1, 5, 6]; // The etypeIds in display order
+        const actorSlots = actor.equipSlots();
+        const equips = actor.equips();
+
+        const equipX = 390;
+        let equipY = 16;
+        const equipLineH = 66;
+
+        // Need to figure out which slot we're replacing for stats, but we DO NOT show it in the names list
+        let replacingSlotIndex = -1;
+        if (canEquip) {
+            // Find the slot for this item's etypeId
+            replacingSlotIndex = actorSlots.indexOf(this._item.etypeId);
+        }
+
+        for (let i = 0; i < slotOrder.length; i++) {
+            const etypeId = slotOrder[i];
+            const slotIndex = actorSlots.indexOf(etypeId);
+
+            let itemName = "";
+
+            if (slotIndex >= 0) {
+                const item = equips[slotIndex];
+                if (item) itemName = item.name;
+            }
+
+            if (itemName) {
+                let color = '#C5B8A8';
+
+                // Shadow
+                this.contents.textColor = '#000000';
+                this.contents.drawText(itemName, equipX + 2, equipY + 2, 200, 48);
+                // Text
+                this.contents.textColor = color;
+                this.contents.drawText(itemName, equipX, equipY, 200, 48);
+            }
+
+            equipY += equipLineH;
+        }
+
+        // --- 3. Draw Stats (Right) ---
+        // Always display current stats (no preview calculation)
+        const currentStats = {
+            atk: actor.param(2),
+            mat: actor.param(4),
+            def: actor.param(3),
+            agi: actor.param(6),
+            luk: actor.param(7)
+        };
+
+        const statX = 830;
+        let statY = 16;
+        const statLineH = 66;
+
+        // Format: 武术(atk), 灵力(mat), 防御(def), 身法(agi), 吉运(luk)
+        this._drawStatDigitValue(currentStats.atk, statX, statY);
+        statY += statLineH;
+        this._drawStatDigitValue(currentStats.mat, statX, statY);
+        statY += statLineH;
+        this._drawStatDigitValue(currentStats.def, statX, statY);
+        statY += statLineH;
+        this._drawStatDigitValue(currentStats.agi, statX, statY);
+        statY += statLineH;
+        this._drawStatDigitValue(currentStats.luk, statX, statY);
+    };
+
+    Window_PalEquipActor.prototype._drawStatDigitValue = function (value, x, y) {
+        const curImgs = this._digitAttr;
+        if (curImgs.some(img => !img.isReady())) return;
+
+        const str = Math.max(0, value).toString();
+        const scale = 3;
+        const spacing = -2;
+
+        // Calculate total width to right-align
+        let totalW = 0;
+        for (let i = 0; i < str.length; i++) {
+            const digit = parseInt(str[i]);
+            if (!isNaN(digit)) {
+                totalW += curImgs[digit].width * scale + spacing;
+            }
+        }
+        totalW -= spacing; // Remove last spacing
+
+        let curX = x - totalW; // Right align
+        const yOffset = 16;
+
+        // Draw digits
+        for (let i = 0; i < str.length; i++) {
+            const digit = parseInt(str[i]);
+            if (isNaN(digit)) continue;
+
+            const img = curImgs[digit];
+            this.contents.blt(img, 0, 0, img.width, img.height, curX, y + yOffset, img.width * scale, img.height * scale);
+
+            curX += img.width * scale + spacing;
+        }
+    };
+
+    Window_PalEquipActor.prototype._drawItemInfo = function () {
+        if (!this._item) return;
+
+        const padX = 12;
+        const bgScale = 3;
+        const bgW = this._iconBg.width * bgScale;
+        const bgH = this._iconBg.height * bgScale;
+        const bgY = 8; // Top alignment
+
+        // Removed drawing this._iconBg since it's already on the main background
+
+        // Draw Icon
+        const iconIndex = this._item.iconIndex;
+        const iconSet = ImageManager.loadSystem("IconSet");
+        const pw = ImageManager.iconWidth;
+        const ph = ImageManager.iconHeight;
+        const sx = (iconIndex % 16) * pw;
+        const sy = Math.floor(iconIndex / 16) * ph;
+        const iconScale = 3;
+        const iconW = pw * iconScale;
+        const iconH = ph * iconScale;
+        const iconX = padX + (bgW - iconW) / 2;
+        const iconY = bgY + (bgH - iconH) / 2;
+
+        if (iconSet.isReady()) {
+            this.contents.blt(iconSet, sx, sy, pw, ph, iconX, iconY, iconW, iconH);
+        }
+
+        // Draw Quantity
+        const quantity = $gameParty.numItems(this._item);
+        if (quantity > 0) {
+            const qStr = quantity.toString();
+            let totalW = 0;
+            const qImgs = this._digitQuantity;
+            const qScale = 3;
+            if (qImgs.every(img => img.isReady())) {
+                for (let i = 0; i < qStr.length; i++) {
+                    totalW += qImgs[parseInt(qStr[i])].width * qScale;
+                }
+                let qX = padX + bgW - totalW - 20;
+                let qY = bgY + bgH - 36;
+                for (let i = 0; i < qStr.length; i++) {
+                    const digit = parseInt(qStr[i]);
+                    const img = qImgs[digit];
+                    this.contents.blt(img, 0, 0, img.width, img.height, qX, qY, img.width * qScale, img.height * qScale);
+                    qX += img.width * qScale;
+                }
+            }
+        }
+
+        // Draw Item Name
+        const nameX = padX - 10;
+        const nameY = bgY + 190;
+        this.contents.fontSize = 42;
+        this.contents.textColor = '#000000';
+        this.contents.drawText(this._item.name, nameX + 2, nameY + 2, 200, 48);
+        this.contents.textColor = '#FBC971';
+        this.contents.drawText(this._item.name, nameX, nameY, 200, 48);
+    };
+
+    //-----------------------------------------------------------------------------
     // Scene_PaladinItem
+
     //-----------------------------------------------------------------------------
     function Scene_PaladinItem() {
         this.initialize(...arguments);
@@ -885,6 +1310,7 @@
         this.createHelpWindow();
         this.createItemWindow();
         this.createActorWindow();
+        this.createEquipActorWindow();
     };
 
     Scene_PaladinItem.prototype.createBackground = function () {
@@ -963,6 +1389,86 @@
         this._itemWindow.setItemsVisible(true);
     };
 
+    Scene_PaladinItem.prototype.createEquipActorWindow = function () {
+        const rect = new Rectangle(0, 0, Graphics.boxWidth, Graphics.boxHeight);
+        this._equipActorWindow = new Window_PalEquipActor(rect);
+        this._equipActorWindow.setHandler("ok", this.onEquipActorOk.bind(this));
+        this._equipActorWindow.setHandler("cancel", this.onEquipActorCancel.bind(this));
+        this.addChild(this._equipActorWindow);
+        this._equipActorWindow.hide();
+    };
+
+    Scene_PaladinItem.prototype.showEquipActorWindow = function () {
+        this._itemWindow.hide();
+        this._helpWindow.hide();
+        this._equipActorWindow.setItem(this.item());
+        this._equipActorWindow.show();
+        this._equipActorWindow.activate();
+        this._equipActorWindow.select(0);
+    };
+
+    Scene_PaladinItem.prototype.hideEquipActorWindow = function () {
+        this._equipActorWindow.hide();
+        this._equipActorWindow.deactivate();
+        this._itemWindow.show();
+        this._helpWindow.show();
+        this._itemWindow.activate();
+        // Item count might have changed
+        this._itemWindow.refresh();
+    };
+
+    Scene_PaladinItem.prototype.onEquipActorOk = function () {
+        const actor = this._equipActorWindow.actor(this._equipActorWindow.index());
+        // Use the item currently held by the equip window, not necessarily the item list window
+        const item = this._equipActorWindow._item;
+
+        if (actor && item && actor.canEquip(item)) {
+            SoundManager.playEquip();
+
+            // Perform equip change
+            const slotIndex = actor.equipSlots().indexOf(item.etypeId);
+            if (slotIndex >= 0) {
+                const oldItem = actor.equips()[slotIndex];
+
+                // Change equip handles the inventory updates
+                actor.changeEquip(slotIndex, item);
+
+                // Refresh item window to get updated inventory
+                this._itemWindow.refresh();
+
+                if (oldItem) {
+                    // Make the old item the new selected item
+                    const itemIndex = this._itemWindow._data.indexOf(oldItem);
+                    if (itemIndex >= 0) {
+                        this._itemWindow.select(itemIndex);
+                    }
+                    this._equipActorWindow.setItem(oldItem);
+                    this._equipActorWindow.activate();
+                } else {
+                    // No old item. If we ran out of the current item, go back.
+                    if ($gameParty.numItems(item) === 0) {
+                        this.hideEquipActorWindow();
+                    } else {
+                        // Refresh the window to show new stats and inventory amount
+                        this._equipActorWindow.setItem(item);
+                        this._equipActorWindow.activate();
+                    }
+                }
+            } else {
+                SoundManager.playBuzzer();
+                this._equipActorWindow.activate();
+            }
+        } else {
+            SoundManager.playBuzzer();
+            this._equipActorWindow.activate();
+        }
+    };
+
+    Scene_PaladinItem.prototype.onEquipActorCancel = function () {
+        SoundManager.playCancel();
+        this.hideEquipActorWindow();
+    };
+
     Scene_PaladinItem.prototype.playSeForItem = function () {
         SoundManager.playUseItem();
     };
@@ -1024,6 +1530,14 @@
         if (this._categoryMode === 'use') {
             $gameParty.setLastItem(this.item());
             this.determineItem();
+        } else if (this._categoryMode === 'equip') {
+            if (this.item()) {
+                SoundManager.playOk();
+                this.showEquipActorWindow();
+            } else {
+                SoundManager.playBuzzer();
+                this._itemWindow.activate();
+            }
         } else {
             SoundManager.playBuzzer();
             this._itemWindow.activate();
@@ -1038,6 +1552,7 @@
     window.Window_PaladinItemList = Window_PaladinItemList;
     window.Window_PaladinItemHelp = Window_PaladinItemHelp;
     window.Window_PalItemActor = Window_PalItemActor;
+    window.Window_PalEquipActor = Window_PalEquipActor;
     window.Scene_PaladinItem = Scene_PaladinItem;
 
 })();
