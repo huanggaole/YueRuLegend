@@ -9,5 +9,6 @@ var $plugins =
 {"name":"palStatus","status":true,"description":"[v1.0] 仿仙剑98柔情版状态界面","parameters":{}},
 {"name":"Pal_Icon48","status":true,"description":"Paladin 48x48 Icon Support","parameters":{"IconSetFilename":"IconSet48","IconSize":"48"}},
 {"name":"palItemList","status":true,"description":"Chinese Paladin Item List UI","parameters":{}},
-{"name":"palMagic","status":true,"description":"Chinese Paladin Magic List UI","parameters":{}}
+{"name":"palMagic","status":true,"description":"Chinese Paladin Magic List UI","parameters":{}},
+{"name":"palBattle","status":true,"description":"[v1.0] Chinese Paladin 98 Battle System & UI","parameters":{}}
 ];

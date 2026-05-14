@@ -1,4 +1,4 @@
-/*:
+﻿/*:
  * @target MZ
  * @plugindesc Chinese Paladin Window Base & Title Command
  * @author AI Assistant
@@ -805,6 +805,7 @@
 
     Window_PaladinPartyStatus.prototype.refresh = function () {
         const members = $gameParty.battleMembers();
+        if (!members || members.length === 0) return;
 
         if (this._images.some(img => !img.isReady())) {
             this._images.forEach(img => {
