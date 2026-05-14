@@ -1,17 +1,20 @@
 ﻿/*:
  * @target MZ
- * @plugindesc [v1.0] Chinese Paladin 98 Battle System & UI
+ * @plugindesc [v1.7] Chinese Paladin 98 Battle System & UI
  * @author AI Assistant
  *
  * @help
- * Implements Paladin 98 style combat layout.
+ * Implements Paladin 98 style combat layout and indicators.
+ * 
+ * Required images (place in img/system, all scaled x3):
+ * - Action indicator: Data968.png, Data969.png
+ * - Target indicator: Data966.png, Data967.png
  */
 
 (() => {
     //-----------------------------------------------------------------------------
-    // Window_ActorCommand
+    // Window_ActorCommand (原有代码保持不变)
     //-----------------------------------------------------------------------------
-
 
     const _Window_ActorCommand_initialize = Window_ActorCommand.prototype.initialize;
     Window_ActorCommand.prototype.initialize = function (rect) {
@@ -66,6 +69,9 @@
         this.select(0); // 默认选中攻击(Top)
         this.activate();
         this.open();
+
+        // 角色指令窗口激活时显示红色箭头
+        Pal98IndicatorManager.showRedArrow(actor);
     };
 
     Window_ActorCommand.prototype.cursorDown = function (wrap) {
@@ -75,7 +81,6 @@
         if (i === 0) this.select(2);      // Top -> Bottom
         else if (i === 1) this.select(2); // Left -> Bottom
         else if (i === 3) this.select(2); // Right -> Bottom
-        // else if (i === 2 && wrap) this.select(0); // Bottom -> Top
         SoundManager.playCursor();
     };
 
@@ -86,7 +91,6 @@
         if (i === 2) this.select(0);      // Bottom -> Top
         else if (i === 1) this.select(0); // Left -> Top
         else if (i === 3) this.select(0); // Right -> Top
-        // else if (i === 0 && wrap) this.select(2); // Top -> Bottom
         SoundManager.playCursor();
     };
 
@@ -97,7 +101,6 @@
         if (i === 1) this.select(3);      // Left -> Right
         else if (i === 0) this.select(3); // Top -> Right
         else if (i === 2) this.select(3); // Bottom -> Right
-        // else if (i === 3 && wrap) this.select(1); // Right -> Left
         SoundManager.playCursor();
     };
 
@@ -108,7 +111,6 @@
         if (i === 3) this.select(1);      // Right -> Left
         else if (i === 0) this.select(1); // Top -> Left
         else if (i === 2) this.select(1); // Bottom -> Left
-        // else if (i === 1 && wrap) this.select(3); // Left -> Right
         SoundManager.playCursor();
     };
 
@@ -176,11 +178,11 @@
     };
 
     //-----------------------------------------------------------------------------
-    // Scene_Battle Integration
+    // Scene_Battle Integration (原有代码保持不变)
     //-----------------------------------------------------------------------------
 
     // -----------------------------------------------------------------------------
-    // 重写 Window_BattleStatus 以实现和 _paladinStatusWindow 完全一致的外观
+    // 重写 Window_BattleStatus 以实现和 _paladinPartyStatus 完全一致的外观
     // -----------------------------------------------------------------------------
     const _Window_BattleStatus_initialize = Window_BattleStatus.prototype.initialize;
     Window_BattleStatus.prototype.initialize = function (rect) {
@@ -273,23 +275,11 @@
     const _Scene_Battle_updateStatusWindowPosition = Scene_Battle.prototype.updateStatusWindowPosition;
     Scene_Battle.prototype.updateStatusWindowPosition = function () {
         // Override to prevent MZ from sliding the status window
-        /*
-        const statusWindow = this._statusWindow;
-        
-        if (statusWindow.x < targetX) {
-            statusWindow.x = Math.min(statusWindow.x + 16, targetX);
-            // 隐藏 statusWindow
-            this._statusWindow.hide();
-        }
-        if (statusWindow.x > targetX) {
-            statusWindow.x = Math.max(statusWindow.x - 16, targetX);
-            this._statusWindow.hide();
-        }
-        */
         if (this.isAnyInputWindowActive()) {
             this._statusWindow.show();
         } else {
             this._statusWindow.hide();
+            Pal98IndicatorManager.hideAll();
         }
     };
 
@@ -346,7 +336,7 @@
     Window_BattleLog.prototype.drawLineText = function () { };
 
     //-----------------------------------------------------------------------------
-    // Sprite_Actor & Sprite_Enemy Tweaks
+    // Sprite_Actor & Sprite_Enemy Tweaks (原有代码保持不变)
     //-----------------------------------------------------------------------------
     Sprite_Actor.prototype.setActorHome = function (index) {
         const current = $gameParty.battleMembers().length;
@@ -422,7 +412,207 @@
     };
     Sprite_Enemy.prototype.updateStateSprite = function () { };
 
+    //-----------------------------------------------------------------------------
+    // 仙剑98风格头顶指示器实现（红色箭头回合内永久显示）
+    //-----------------------------------------------------------------------------
+    // 全局指示器状态管理器
+    const Pal98IndicatorManager = {
+        config: {
+            fps: 15,
+            frameInterval: 1000 / 15,
+            redArrow: {
+                offsetX: -24,
+                offsetY: -222,
+                frames: ['Data968', 'Data969']
+            },
+            yellowTriangle: {
+                offsetX: -24,
+                offsetY: -201,
+                frames: ['Data966', 'Data967']
+            }
+        },
+        state: {
+            redArrow: { visible: false, target: null },
+            yellowTriangle: { visible: false, target: null }
+        },
+        sprites: {},
+        currentFrame: 0,
+        lastUpdateTime: 0,
+
+        // 初始化指示器
+        initialize: function (battleField) {
+            // 预加载所有图片
+            this.redArrowFrames = this.config.redArrow.frames.map(
+                name => ImageManager.loadSystem(name)
+            );
+            this.yellowTriangleFrames = this.config.yellowTriangle.frames.map(
+                name => ImageManager.loadSystem(name)
+            );
+
+            // 创建红色行动指示器
+            this.sprites.redArrow = new Sprite();
+            this.sprites.redArrow.anchor.set(0.5, 1.0);
+            this.sprites.redArrow.scale.set(3);
+            this.sprites.redArrow.visible = false;
+            this.sprites.redArrow.z = 9999; // 绝对最高层
+            this.sprites.redArrow.bitmap = this.redArrowFrames[0]; // 初始帧
+            battleField.addChild(this.sprites.redArrow);
+
+            // 创建黄色目标指示器
+            this.sprites.yellowTriangle = new Sprite();
+            this.sprites.yellowTriangle.anchor.set(0.5, 1.0);
+            this.sprites.yellowTriangle.scale.set(3);
+            this.sprites.yellowTriangle.visible = false;
+            this.sprites.yellowTriangle.z = 9999; // 绝对最高层
+            this.sprites.yellowTriangle.bitmap = this.yellowTriangleFrames[0]; // 初始帧
+            battleField.addChild(this.sprites.yellowTriangle);
+
+            // 重置动画状态
+            this.currentFrame = 0;
+            this.lastUpdateTime = Date.now();
+        },
+
+        // 更新动画和位置
+        update: function (battlerSprites) {
+            // 15FPS两帧硬切闪烁
+            const now = Date.now();
+            if (now - this.lastUpdateTime >= this.config.frameInterval) {
+                this.currentFrame = 1 - this.currentFrame;
+                this.lastUpdateTime = now;
+
+                if (this.sprites.redArrow.visible) {
+                    this.sprites.redArrow.bitmap = this.redArrowFrames[this.currentFrame];
+                }
+                if (this.sprites.yellowTriangle.visible) {
+                    this.sprites.yellowTriangle.bitmap = this.yellowTriangleFrames[this.currentFrame];
+                }
+            }
+
+            // 更新红色箭头位置（独立更新，不受黄色三角影响）
+            if (this.state.redArrow.visible && this.state.redArrow.target) {
+                const sprite = battlerSprites.find(
+                    s => s._battler && s._battler === this.state.redArrow.target
+                );
+                if (sprite) {
+                    this.sprites.redArrow.x = sprite.x + this.config.redArrow.offsetX;
+                    this.sprites.redArrow.y = sprite.y + this.config.redArrow.offsetY;
+                    this.sprites.redArrow.visible = true;
+                } else {
+                    this.sprites.redArrow.visible = false;
+                }
+            } else {
+                this.sprites.redArrow.visible = false;
+            }
+
+            // 更新黄色三角位置（独立更新）
+            if (this.state.yellowTriangle.visible && this.state.yellowTriangle.target) {
+                const sprite = battlerSprites.find(
+                    s => s._battler && s._battler === this.state.yellowTriangle.target
+                );
+                if (sprite) {
+                    this.sprites.yellowTriangle.x = sprite.x + this.config.yellowTriangle.offsetX;
+                    this.sprites.yellowTriangle.y = sprite.y + this.config.yellowTriangle.offsetY;
+                    this.sprites.yellowTriangle.visible = true;
+                } else {
+                    this.sprites.yellowTriangle.visible = false;
+                }
+            } else {
+                this.sprites.yellowTriangle.visible = false;
+            }
+        },
+
+        // 显示红色箭头（仅在角色回合开始时调用）
+        showRedArrow: function (target) {
+            this.state.redArrow.visible = true;
+            this.state.redArrow.target = target;
+            Pal98IndicatorManager.hideYellowTriangle();
+        },
+
+        // 显示黄色三角（选人时调用，不影响红色箭头）
+        showYellowTriangle: function (target) {
+            this.state.yellowTriangle.visible = true;
+            this.state.yellowTriangle.target = target;
+        },
+
+        // 只隐藏黄色三角（确认/取消选人时调用）
+        hideYellowTriangle: function () {
+            this.state.yellowTriangle.visible = false;
+            this.state.yellowTriangle.target = null;
+        },
+
+        // 隐藏所有指示器（角色行动结束/战斗结束时调用）
+        hideAll: function () {
+            this.state.redArrow.visible = false;
+            this.state.redArrow.target = null;
+            this.state.yellowTriangle.visible = false;
+            this.state.yellowTriangle.target = null;
+        }
+    };
+
+    // 在战斗精灵集创建完成后初始化指示器
+    const _Spriteset_Battle_createBattleField = Spriteset_Battle.prototype.createBattleField;
+    Spriteset_Battle.prototype.createBattleField = function () {
+        _Spriteset_Battle_createBattleField.call(this);
+        Pal98IndicatorManager.initialize(this._battleField);
+    };
+
+    // 重写战斗场景更新方法
+    const _Scene_Battle_update = Scene_Battle.prototype.update;
+    Scene_Battle.prototype.update = function () {
+        _Scene_Battle_update.call(this);
+        if (this._spriteset) {
+            Pal98IndicatorManager.update(this._spriteset.battlerSprites());
+        }
+    };
+
+    const _Window_BattleActor_select = Window_BattleActor.prototype.select;
+    Window_BattleActor.prototype.select = function (index) {
+        console.error("Window_BattleActor_select", index);
+        _Window_BattleActor_select.call(this, index);
+        if (index >= 0 && index < $gameParty.battleMembers().length) {
+            Pal98IndicatorManager.showYellowTriangle($gameParty.battleMembers()[index]);
+        } else {
+            Pal98IndicatorManager.hideYellowTriangle();
+        }
+    };
+
+    // 敌人目标闪烁效果，我方目标显示选人三角
+    const _Sprite_Battler_updateSelectionEffect = Sprite_Battler.prototype.updateSelectionEffect;
+    Sprite_Battler.prototype.updateSelectionEffect = function () {
+        if (this._battler.isActor()) {
+        } else {
+            _Sprite_Battler_updateSelectionEffect.call(this)
+        }
+    };
+
+    // 取消选择我方目标（取消物品/技能使用）
+    const _Scene_Battle_onActorCancel = Scene_Battle.prototype.onActorCancel;
+    Scene_Battle.prototype.onActorCancel = function () {
+        _Scene_Battle_onActorCancel.call(this);
+        Pal98IndicatorManager.hideYellowTriangle();
+    };
+
+    // 确认选择我方目标时触发
+    const _Scene_Battle_onActorOk = Scene_Battle.prototype.onActorOk;
+    Scene_Battle.prototype.onActorOk = function () {
+        // 在这里添加确认我方目标前的逻辑
+        _Scene_Battle_onActorOk.call(this);
+        // 在这里添加确认我方目标后的逻辑
+        Pal98IndicatorManager.hideYellowTriangle();
+    };
+
+    // 第一重保险：新回合开始时立即隐藏所有指示器
+    // const _BattleManager_startTurn = BattleManager.startTurn;
+    // BattleManager.startTurn = function () {
+    //     Pal98IndicatorManager.hideAll();
+    //     _BattleManager_startTurn.call(this);
+    // };
+
+    // // 第二重保险：新角色输入阶段开始时隐藏黄色三角
+    // const _BattleManager_startInput = BattleManager.startInput;
+    // BattleManager.startInput = function () {
+    //     Pal98IndicatorManager.hideYellowTriangle();
+    //     _BattleManager_startInput.call(this);
+    // };
+
 })();
-
-
-
