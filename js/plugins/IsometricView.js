@@ -276,4 +276,47 @@
         $gameMap.refresh();
     });
 
+    // ============================================================================
+    // 修复像素渗漏（Texture Bleeding / Edge Bleed）
+    // ============================================================================
+    // 在等距投影（Isometric）下，由于角色精灵应用了仿射变换矩阵且进行了非等比缩放（scale 2x4），
+    // GPU在进行纹理采样（Linear Filtering）时，由于浮点数舍入误差，可能会采样到相邻行走图帧的边缘像素。
+    // 这会导致角色在行走过程中边缘出现一条变色或闪烁的“多元线”。
+    //
+    // 解决方法：重写 Sprite.prototype._refresh，若属于角色精灵（或其涉水半身子精灵），
+    // 将其纹理采样区域（Texture Frame）向内微调收缩半个像素（0.5 像素）。
+    // 为什么是 0.5 像素？因为 GPU 的双线性过滤（Bilinear Filtering）插值半径为 0.5 像素。
+    // 收缩 0.5 像素可以物理上阻断插值器触及相邻帧像素，从而 100% 完美消除边缘渗漏，且角色边缘清晰自然。
+    
+    const _Sprite_refresh = Sprite.prototype._refresh;
+    Sprite.prototype._refresh = function() {
+        _Sprite_refresh.call(this);
+        
+        // 检查是否为角色相关精灵（Sprite_Character）或其子精灵（半身水深遮挡等）
+        const isCharacterRelated = (this instanceof Sprite_Character) || (this.parent && this.parent instanceof Sprite_Character);
+        
+        if (isCharacterRelated && this.texture && this.texture.baseTexture) {
+            const frame = this.texture.frame;
+            if (frame && frame.width > 0 && frame.height > 0) {
+                const pad = 0.5; // 0.5 像素缩进，彻底消除边缘像素渗漏
+                const baseTexture = this.texture.baseTexture;
+                
+                // 基于原始坐标/尺寸计算缩进后的坐标
+                const realX = Math.floor(this._frame.x);
+                const realY = Math.floor(this._frame.y);
+                const realW = Math.floor(this._frame.width);
+                const realH = Math.floor(this._frame.height);
+                
+                const newX = (realX + pad).clamp(0, baseTexture.width);
+                const newY = (realY + pad).clamp(0, baseTexture.height);
+                const newW = (realW - 2 * pad).clamp(0, baseTexture.width - newX);
+                const newH = (realH - 2 * pad).clamp(0, baseTexture.height - newY);
+                
+                // 重新设置微调缩进后的纹理矩形
+                this.texture.frame = new PIXI.Rectangle(newX, newY, newW, newH);
+                this.texture._updateID++;
+            }
+        }
+    };
+
 })();
