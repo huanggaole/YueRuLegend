@@ -176,6 +176,7 @@
         this._palCurrentLine = 0;
         this._palNeedsRedraw = false;
         this._createPalFaceSprites();
+        this._createPalMiddleScrollSprites();
     };
 
     // ---------- 创建头像精灵 ----------
@@ -188,6 +189,33 @@
         this.addChild(bottomSprite);
         this._palFaceSprites.top = topSprite;
         this._palFaceSprites.bottom = bottomSprite;
+    };
+
+    // ---------- 创建中间卷轴精灵 ----------
+    Window_Message.prototype._createPalMiddleScrollSprites = function () {
+        this._palMiddleScrollSprites = { left: new Sprite(), center: new TilingSprite(), right: new Sprite() };
+        this._palMiddleScrollSprites.left.bitmap = ImageManager.loadSystem('Data944');
+        this._palMiddleScrollSprites.center.bitmap = ImageManager.loadSystem('Data945');
+        this._palMiddleScrollSprites.right.bitmap = ImageManager.loadSystem('Data946');
+
+        this._palMiddleScrollSprites.left.scale.set(3, 3);
+        this._palMiddleScrollSprites.center.scale.set(3, 3);
+        this._palMiddleScrollSprites.right.scale.set(3, 3);
+
+        this._palMiddleScrollSprites.left.visible = false;
+        this._palMiddleScrollSprites.center.visible = false;
+        this._palMiddleScrollSprites.right.visible = false;
+
+        // 放在背景层，文字之下
+        if (this._clientArea) {
+            this._clientArea.addChildAt(this._palMiddleScrollSprites.left, 0);
+            this._clientArea.addChildAt(this._palMiddleScrollSprites.center, 0);
+            this._clientArea.addChildAt(this._palMiddleScrollSprites.right, 0);
+        } else {
+            this.addChildToBack(this._palMiddleScrollSprites.right);
+            this.addChildToBack(this._palMiddleScrollSprites.center);
+            this.addChildToBack(this._palMiddleScrollSprites.left);
+        }
     };
 
     // ---------- updatePlacement：窗口始终全屏，只更新当前方位 ----------
@@ -277,6 +305,48 @@
         // 重置字体颜色为正文颜色（_drawPalName 会把 textColor 留在 NameColor，需要还原）
         this._applyPalFontSettings();
 
+        // 中间卷轴显示逻辑
+        if (pos === 1 && this._palMiddleScrollSprites) {
+            const leftSpr = this._palMiddleScrollSprites.left;
+            const centerSpr = this._palMiddleScrollSprites.center;
+            const rightSpr = this._palMiddleScrollSprites.right;
+
+            // 预估原图宽度，如果尚未加载完成先给个默认值
+            const lImgW = leftSpr.bitmap.isReady() ? leftSpr.bitmap.width : 16;
+            const lImgH = leftSpr.bitmap.isReady() ? leftSpr.bitmap.height : 24;
+            const rImgW = rightSpr.bitmap.isReady() ? rightSpr.bitmap.width : 16;
+
+            const scale = 3;
+            const lw = lImgW * scale;
+            const rw = rImgW * scale;
+
+            // 计算中间平铺部分的宽度（文字宽度 + 两侧边距）
+            const textPadding = 24;
+            const centerW = (coords.textWidth || 200) + textPadding * 2;
+
+            const totalW = lw + centerW + rw;
+            const startX = (Graphics.boxWidth - totalW) / 2;
+            // 卷轴垂直中心对齐到文字的垂直中心
+            const startY = coords.textY + PAL_LINE_HEIGHT / 2 - (lImgH * scale) / 2;
+
+            leftSpr.x = startX;
+            leftSpr.y = startY;
+            leftSpr.visible = true;
+
+            centerSpr.x = startX + lw;
+            centerSpr.y = startY;
+            centerSpr.width = Math.ceil(centerW / scale); // TilingSprite 的 width 是缩放前的大小
+            centerSpr.height = lImgH;
+            centerSpr.visible = true;
+
+            rightSpr.x = startX + lw + centerW;
+            rightSpr.y = startY;
+            rightSpr.visible = true;
+
+            // 重新微调文字的 X 坐标使其完美在卷轴中居中
+            coords.textX = startX + lw + textPadding;
+        }
+
         // 设置 textState 起始坐标（正文从名字行下方开始）
         textState.x = coords.textX;
         textState.startX = coords.textX;
@@ -303,6 +373,11 @@
             this.contents.clear();
             if (this._palFaceSprites.top) this._palFaceSprites.top.visible = false;
             if (this._palFaceSprites.bottom) this._palFaceSprites.bottom.visible = false;
+            if (this._palMiddleScrollSprites) {
+                this._palMiddleScrollSprites.left.visible = false;
+                this._palMiddleScrollSprites.center.visible = false;
+                this._palMiddleScrollSprites.right.visible = false;
+            }
         }
     };
 
@@ -341,9 +416,17 @@
             const textX = nameX + textIndent;
             return { nameX, nameY, textX, textY };
         } else {
-            // 中间
-            const textY = Math.floor((Graphics.boxHeight - PAL_MAX_LINES * PAL_LINE_HEIGHT) / 2);
-            return { nameX: PAL_TOP_MX, nameY: textY - PAL_LINE_HEIGHT, textX: PAL_TOP_MX + textIndent, textY };
+            // 中间卷轴
+            // 获取正文内容并计算宽度（假设中间文本只有一行，且无名字）
+            const text = $gameMessage.allText();
+            const textInfo = this.textSizeEx(text);
+            const textWidth = textInfo.width || 200;
+
+            // 文本和卷轴在屏幕中水平居中，Y坐标指定为大约 200 像素
+            const textX = (Graphics.boxWidth - textWidth) / 2;
+            const textY = 160;
+
+            return { nameX: 0, nameY: 0, textX, textY, textWidth };
         }
     };
 
@@ -460,13 +543,19 @@
         // 保存当前颜色
         const mainColor = bitmap.textColor;
 
-        // 1. 黑色阴影（偏移绘制）
-        bitmap.textColor = '#000000';
-        bitmap.drawText(text, x + PAL_SHADOW_X, y + PAL_SHADOW_Y, width + 10, height, 'left');
+        if (this._positionType === 1) {
+            // 中间卷轴：纯黑文字，无阴影
+            bitmap.textColor = '#000000';
+            bitmap.drawText(text, x, y, width + 10, height, 'left');
+        } else {
+            // 1. 黑色阴影（偏移绘制）
+            bitmap.textColor = '#000000';
+            bitmap.drawText(text, x + PAL_SHADOW_X, y + PAL_SHADOW_Y, width + 10, height, 'left');
 
-        // 2. 主色文字
-        bitmap.textColor = mainColor;
-        bitmap.drawText(text, x, y, width + 10, height, 'left');
+            // 2. 主色文字
+            bitmap.textColor = mainColor;
+            bitmap.drawText(text, x, y, width + 10, height, 'left');
+        }
 
         // 更新 textState 坐标（与原版 flushTextState 逻辑一致）
         textState.x += rtl ? -width : width;
@@ -498,6 +587,11 @@
         // 全部对话结束时清理画面和头像
         if (this._palFaceSprites.top) this._palFaceSprites.top.visible = false;
         if (this._palFaceSprites.bottom) this._palFaceSprites.bottom.visible = false;
+        if (this._palMiddleScrollSprites) {
+            this._palMiddleScrollSprites.left.visible = false;
+            this._palMiddleScrollSprites.center.visible = false;
+            this._palMiddleScrollSprites.right.visible = false;
+        }
         this.contents.clear();
         this._palSpeakerName = '';
         this._palActiveSide = null;
@@ -545,7 +639,8 @@
         const sprite = this._pauseSignSprite;
         if (!sprite) return;
 
-        if (!this.pause) {
+        // 不在中间系统卷轴显示停顿倒三角
+        if (!this.pause || this._positionType === 1) {
             sprite.visible = false;
             return;
         }
