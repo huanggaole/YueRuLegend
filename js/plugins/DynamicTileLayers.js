@@ -85,7 +85,12 @@ Sprite_DynamicTile.prototype.initBitmap = function () {
     const sx = ((Math.floor(tileId / 128) % 2) * 8 + (tileId % 8)) * w;
     const sy = (Math.floor((tileId % 256) / 8) % 16) * h;
 
+    // Use exact original frame and scale.
+    // The "background pad" logic in _addSpot now perfectly solves any 
+    // physical cracks or bleeding without modifying geometry!
     this.setFrame(sx, sy, w, h);
+    this.scale.x = 1.0;
+    this.scale.y = 1.0;
 };
 
 Sprite_DynamicTile.prototype.update = function () {
@@ -97,11 +102,18 @@ Sprite_DynamicTile.prototype.updatePosition = function () {
     const tw = $gameMap.tileWidth();
     const th = $gameMap.tileHeight();
 
-    const scrolledX = $gameMap.adjustX(this._mx);
-    const scrolledY = $gameMap.adjustY(this._my);
+    // To prevent 1px black gaps (WebGL texture bleeding) between adjacent tiles,
+    // we must exactly replicate RMMZ Tilemap's integer rounding logic instead of
+    // using the float 'scrolledX' which drifts by 0.5px.
+    const effX = $gameMap.adjustX(this._mx) + $gameMap.displayX();
+    const effY = $gameMap.adjustY(this._my) + $gameMap.displayY();
 
-    this.x = Math.round(scrolledX * tw);
-    this.y = Math.round((scrolledY + 1) * th);
+    // RMMZ Tilemap uses Math.ceil for its origin tracking!
+    const displayX_px = Math.ceil($gameMap.displayX() * tw);
+    const displayY_px = Math.ceil($gameMap.displayY() * th);
+
+    this.x = Math.round(effX * tw) - displayX_px;
+    this.y = Math.round((effY + 1) * th) - displayY_px;
 
     this._sortX = this.x + tw / 2;
     this._sortY = this.y - this._sortBias;
@@ -162,13 +174,13 @@ Tilemap.prototype._addSpot = function (startX, startY, x, y) {
     // Read Region Layer for heights
     const regionId = this._readMapData(mx, my, 5) || 0;
 
-    if (!this._processHighTile(tileId0, dx, dy, mx, my, regionId, 0)) {
-        this._addSpotTile(tileId0, dx, dy);
-    }
+    // Process layer 0 and ALWAYS draw static backdrop pad
+    this._processHighTile(tileId0, dx, dy, mx, my, regionId, 0);
+    this._addSpotTile(tileId0, dx, dy);
 
-    if (!this._processHighTile(tileId1, dx, dy, mx, my, regionId, 1)) {
-        this._addSpotTile(tileId1, dx, dy);
-    }
+    // Process layer 1 and ALWAYS draw static backdrop pad
+    this._processHighTile(tileId1, dx, dy, mx, my, regionId, 1);
+    this._addSpotTile(tileId1, dx, dy);
 
     this._addShadow(this._lowerLayer, shadowBits, dx, dy);
 
@@ -178,7 +190,12 @@ Tilemap.prototype._addSpot = function (startX, startY, x, y) {
         }
     }
 
-    if (!this._processHighTile(tileId2, dx, dy, mx, my, regionId, 2)) {
+    // Process layer 2
+    const isDyn2 = this._processHighTile(tileId2, dx, dy, mx, my, regionId, 2);
+    if (isDyn2) {
+        // Dynamic: force static backdrop to lowerLayer so it doesn't cover characters
+        this._addTile(this._lowerLayer, tileId2, dx, dy);
+    } else {
         if (this._isHigherTile(tileId2)) {
             this._addTile(this._upperLayer, tileId2, dx, dy);
         } else {
@@ -186,7 +203,12 @@ Tilemap.prototype._addSpot = function (startX, startY, x, y) {
         }
     }
 
-    if (!this._processHighTile(tileId3, dx, dy, mx, my, regionId, 3)) {
+    // Process layer 3
+    const isDyn3 = this._processHighTile(tileId3, dx, dy, mx, my, regionId, 3);
+    if (isDyn3) {
+        // Dynamic: force static backdrop to lowerLayer
+        this._addTile(this._lowerLayer, tileId3, dx, dy);
+    } else {
         if (this._isHigherTile(tileId3)) {
             this._addTile(this._upperLayer, tileId3, dx, dy);
         } else {
@@ -237,6 +259,12 @@ Tilemap.prototype._compareChildOrder = function (a, b) {
 
     return a.spriteId - b.spriteId;
 };
+
+Tilemap.prototype._isHigherTile = function (tileId) {
+    return this.flags[tileId] & 0x10;
+};
+
+// Movement overrides reverted to restore smooth character walking
 
 Tilemap.prototype._processHighTile = function (tileId, dx, dy, mx, my, regionId, layerIndex) {
     if (tileId === 0) return false;
