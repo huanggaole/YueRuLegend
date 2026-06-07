@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc High-layer tiles as Sprites for correct Isometric Occlusion z-sorting.
+ * @plugindesc High-layer tiles as Sprites using Region Layer for Height encoding.
  * 
  * @param showDebug
  * @text Show Debug Heights
@@ -9,15 +9,13 @@
  * @default false
  * 
  * @help
- * Replaces pure layer-based rendering for "High" tiles (flagged with 4 bits height)
+ * Replaces pure layer-based rendering for tiles with height > 0 (encoded in Region Layer)
  * with Sprite-based rendering.
  *
- * This ensures that tiles with height flags (e.g. Trees, Walls) are sorted
- * individually against characters based on their Y coordinate.
- *
- * 插件功能：
- * 将带有高度标志（flags >> 12 > 0）的瓦片渲染为独立Sprite，
- * 从而利用RMMZ内置的Z-sort（根据Y坐标排序）实现正确的斜45度遮挡关系。
+ * Region encoding:
+ * Region ID = Upper_Height * 10 + Lower_Height
+ * - Lower_Height: units digit (Z=0, 1)
+ * - Upper_Height: tens digit (Z=2, 3)
  */
 
 const DTL_params = PluginManager.parameters('DynamicTileLayers');
@@ -30,14 +28,14 @@ function Sprite_DynamicTile() {
 Sprite_DynamicTile.prototype = Object.create(Sprite.prototype);
 Sprite_DynamicTile.prototype.constructor = Sprite_DynamicTile;
 
-Sprite_DynamicTile.SHOW_DEBUG = String(DTL_params['showDebug']).toLowerCase() === 'true'; // Performance Switch: Set true to see height numbers
+Sprite_DynamicTile.SHOW_DEBUG = String(DTL_params['showDebug']).toLowerCase() === 'true';
 
 Sprite_DynamicTile.prototype.initialize = function (tileId, mx, my, bias, height) {
     Sprite.prototype.initialize.call(this);
     this._tileId = tileId;
     this._mx = mx;
     this._my = my;
-    this._sortBias = bias || 0; // Bias for sorting (0 for solids, 48 for ground)
+    this._sortBias = bias || 0; 
     this._height = height || 0;
     this.anchor.x = 0;
     this.anchor.y = 1;
@@ -53,7 +51,7 @@ Sprite_DynamicTile.prototype.initialize = function (tileId, mx, my, bias, height
 };
 
 Sprite_DynamicTile.prototype.createDebugSprite = function () {
-    if (!Sprite_DynamicTile.SHOW_DEBUG) return; // Optimization
+    if (!Sprite_DynamicTile.SHOW_DEBUG) return;
 
     const bitmap = new Bitmap(32, 20);
     bitmap.fontSize = 14;
@@ -63,58 +61,14 @@ Sprite_DynamicTile.prototype.createDebugSprite = function () {
     sprite.anchor.x = 0.5;
     sprite.anchor.y = 1;
     sprite.x = $gameMap.tileWidth() / 2;
-    sprite.y = -10; // Float above the tile base
+    sprite.y = -10; 
     this.addChild(sprite);
-};
-
-// ... initBitmap ...
-
-Sprite_DynamicTile.prototype.update = function () {
-    Sprite.prototype.update.call(this);
-    this.updatePosition();
-};
-
-Sprite_DynamicTile.prototype.updatePosition = function () {
-    const tw = $gameMap.tileWidth();
-    const th = $gameMap.tileHeight();
-
-    const scrolledX = $gameMap.adjustX(this._mx);
-    const scrolledY = $gameMap.adjustY(this._my);
-
-    this.x = Math.floor(scrolledX * tw);
-    this.y = Math.floor((scrolledY + 1) * th);
-
-    // SortY = Y - Bias.
-    // Solid: Bias 0. SortY = Bottom.
-    // Ground: Bias 48. SortY = Top.
-    this._sortY = this.y - this._sortBias;
-};
-
-// ...
-
-Tilemap.prototype._addDynamicTile = function (tileId, mx, my, flag) {
-    // Determine Bias based on Passability
-    const tileFlag = this.flags[tileId];
-    const isSolid = (tileFlag & 0x0F) !== 0;
-
-    // Bias Logic:
-    // Solid: 0 (Beats Character which is -6)
-    // Ground: 48 (Behind Character)
-    const bias = isSolid ? 0 : 48;
-
-    const sprite = new Sprite_DynamicTile(tileId, mx, my, bias);
-    this.addChild(sprite);
-    this._dynamicSprites.push(sprite);
 };
 
 Sprite_DynamicTile.prototype.initBitmap = function () {
-    // Logic adapted from Tilemap.prototype._addNormalTile and Sprite_Character
     const tileId = this._tileId;
     const tileset = $gameMap.tileset();
 
-    // Determine setNumber (assuming B-E tiles for now, as A tiles are complex autotiles)
-    // Note: If using A-tiles as high tiles, we might need Autotile logic.
-    // Standard RMMZ implementation for _addNormalTile:
     let setNumber = 0;
     if (Tilemap.isTileA5(tileId)) {
         setNumber = 4;
@@ -122,22 +76,16 @@ Sprite_DynamicTile.prototype.initBitmap = function () {
         setNumber = 5 + Math.floor(tileId / 256);
     }
 
-    // Load bitmap
     if (tileset && tileset.tilesetNames[setNumber]) {
         this.bitmap = ImageManager.loadTileset(tileset.tilesetNames[setNumber]);
     }
 
-    // Set frame
     const w = $gameMap.tileWidth();
     const h = $gameMap.tileHeight();
     const sx = ((Math.floor(tileId / 128) % 2) * 8 + (tileId % 8)) * w;
     const sy = (Math.floor((tileId % 256) / 8) % 16) * h;
 
     this.setFrame(sx, sy, w, h);
-
-    // Handle Table table edge case? 
-    // Usually Tables (A2) are drawn with specific logic. 
-    // This sprite implementation primarily targets B-E Object tiles.
 };
 
 Sprite_DynamicTile.prototype.update = function () {
@@ -146,25 +94,15 @@ Sprite_DynamicTile.prototype.update = function () {
 };
 
 Sprite_DynamicTile.prototype.updatePosition = function () {
-    // Calculate Screen Coordinates based on Map Coordinates
     const tw = $gameMap.tileWidth();
     const th = $gameMap.tileHeight();
 
-    // Use adjustX/Y for looping support
     const scrolledX = $gameMap.adjustX(this._mx);
     const scrolledY = $gameMap.adjustY(this._my);
 
-    // Use Math.round to match RMMZ's Sprite_Character Screen Coordinates
-    // This prevents "Jumping" caused by precision mismatches (Floor vs Round)
     this.x = Math.round(scrolledX * tw);
     this.y = Math.round((scrolledY + 1) * th);
 
-    // Sort Priority:
-    // Game_Character screenY is (y+1)*th - shiftY (usually 6).
-    // Sort Priority:
-    // Game_Character screenY is (y+1)*th - shiftY (usually 6).
-    // If Solid (Wall), Bias = 0. SortY = Bottom. (> Char Bottom-6). Object Covers Char.
-    // If Passable (Ground), Bias = 48. SortY = Top. (<< Char Bottom-6). Char Covers Ground.
     this._sortX = this.x + tw / 2;
     this._sortY = this.y - this._sortBias;
 };
@@ -178,13 +116,9 @@ Tilemap.prototype.initialize = function () {
 
 const _Tilemap_updateTransform = Tilemap.prototype.updateTransform;
 Tilemap.prototype.updateTransform = function () {
-    // We hook here if we need to clean up sprites when map refreshes significantly?
-    // Actually _addAllSpots handles the clear.
     _Tilemap_updateTransform.call(this);
 };
 
-// Override _addAllSpots to clear our sprites
-// We can't easily hook _addAllSpots without overwriting or alias
 const _Tilemap_addAllSpots = Tilemap.prototype._addAllSpots;
 Tilemap.prototype._addAllSpots = function (startX, startY) {
     this._clearDynamicSprites();
@@ -201,29 +135,10 @@ Tilemap.prototype._clearDynamicSprites = function () {
     }
 };
 
-Tilemap.prototype._addDynamicTile = function (tileId, mx, my) {
-    const sprite = new Sprite_DynamicTile(tileId, mx, my);
-    this.addChild(sprite);
-    // Check height flag (High 4 bits)
-    const flag = this.flags[tileId] >> 12;
-
-    if (flag > 0) {
-        // It's a high tile -> Create Sprite
-        this._addDynamicTile(tileId, mx, my, flag);
-        return true; // Handled as sprite
-    } else {
-        return false; // Not a high tile
-    }
-};
-
-// Override Tilemap.update to ensure our sprites are updated
 const _Tilemap_update = Tilemap.prototype.update;
 Tilemap.prototype.update = function () {
     _Tilemap_update.call(this);
 
-    // Manually update all dynamic sprites
-    // This is necessary because PIXI/Tilemap doesn't auto-update children
-    // and we need them to track the camera scroll every frame.
     if (this._dynamicSprites) {
         for (const sprite of this._dynamicSprites) {
             sprite.update();
@@ -231,7 +146,7 @@ Tilemap.prototype.update = function () {
     }
 };
 
-// Override _addSpot from DynamicTileLayers.js
+// Override _addSpot
 Tilemap.prototype._addSpot = function (startX, startY, x, y) {
     const mx = startX + x;
     const my = startY + y;
@@ -243,16 +158,15 @@ Tilemap.prototype._addSpot = function (startX, startY, x, y) {
     const tileId3 = this._readMapData(mx, my, 3);
     const shadowBits = this._readMapData(mx, my, 4);
     const upperTileId1 = this._readMapData(mx, my - 1, 1);
+    
+    // Read Region Layer for heights
+    const regionId = this._readMapData(mx, my, 5) || 0;
 
-    // Layer 0 (Ground)
-    // Check if it's a High Tile first. If so, it becomes a sprite.
-    if (!this._processHighTile(tileId0, dx, dy, mx, my)) {
+    if (!this._processHighTile(tileId0, dx, dy, mx, my, regionId, 0)) {
         this._addSpotTile(tileId0, dx, dy);
     }
 
-    // Layer 1 (Ground Object)
-    // Check if it's a High Tile first.
-    if (!this._processHighTile(tileId1, dx, dy, mx, my)) {
+    if (!this._processHighTile(tileId1, dx, dy, mx, my, regionId, 1)) {
         this._addSpotTile(tileId1, dx, dy);
     }
 
@@ -264,13 +178,7 @@ Tilemap.prototype._addSpot = function (startX, startY, x, y) {
         }
     }
 
-    // Upper Layers (2, 3)
-    // If it is a High Tile (Height > 0), it becomes a Sprite (Z=3, Sorted).
-    // If it is NOT a High Tile (Height 0), we must rely on standard RMMZ priority:
-    // - Star (*): _upperLayer (Z=4, Always Above Character).
-    // - Not Star: _lowerLayer (Z=0, Always Behind Character).
-
-    if (!this._processHighTile(tileId2, dx, dy, mx, my)) {
+    if (!this._processHighTile(tileId2, dx, dy, mx, my, regionId, 2)) {
         if (this._isHigherTile(tileId2)) {
             this._addTile(this._upperLayer, tileId2, dx, dy);
         } else {
@@ -278,7 +186,7 @@ Tilemap.prototype._addSpot = function (startX, startY, x, y) {
         }
     }
 
-    if (!this._processHighTile(tileId3, dx, dy, mx, my)) {
+    if (!this._processHighTile(tileId3, dx, dy, mx, my, regionId, 3)) {
         if (this._isHigherTile(tileId3)) {
             this._addTile(this._upperLayer, tileId3, dx, dy);
         } else {
@@ -287,41 +195,23 @@ Tilemap.prototype._addSpot = function (startX, startY, x, y) {
     }
 };
 
-// Global counter for ALL Sprites to ensure stable sorting
 let _globalSpriteIdCounter = 0;
 
-// Patch Sprite to assign unique spriteId
 const _Sprite_initialize = Sprite.prototype.initialize;
 Sprite.prototype.initialize = function () {
     _Sprite_initialize.apply(this, arguments);
     this.spriteId = _globalSpriteIdCounter++;
-    this._sortY = undefined; // Initialize sortY
-    this._sortX = undefined; // Initialize sortX
+    this._sortY = undefined; 
+    this._sortX = undefined; 
 };
 
-Tilemap.prototype._addDynamicTile = function (tileId, mx, my, flag) {
-    // Determine Bias based on Height (Flag)
-    // Flag is the 4-bit height value (0-15).
-
-    // Note: The 'flag' argument IS the height (shifted value passed from _processHighTile).
-    const height = flag;
-
-    // Dynamic Height Bias
-    // Height 1: Ground (Bias 48 -> Behind).
-    // Height > 1: Object occlusion extends "South" by (Height) tiles.
-    // Bias = -(Height * 48).
-    // Example Height 3: Bias -144. SortY = Bottom + 144.
-    // Character @ Y+2: SortY = Bottom + 96 - 6 = +90.
-    // Result: 144 > 90. Tile Occludes Character 2 tiles down.
-
+Tilemap.prototype._addDynamicTile = function (tileId, mx, my, height) {
     const bias = -(height - 1) * 48;
-
     const sprite = new Sprite_DynamicTile(tileId, mx, my, bias, height);
     this.addChild(sprite);
     this._dynamicSprites.push(sprite);
 };
 
-// Override _compareChildOrder to support custom Depth sorting
 Tilemap.prototype._compareChildOrder = function (a, b) {
     if (a.z !== b.z) {
         return a.z - b.z;
@@ -333,42 +223,35 @@ Tilemap.prototype._compareChildOrder = function (a, b) {
     let bDepth = bY;
 
     if (this._isometricEnabled) {
-        // Only apply the strict X+Y pseudo-isometric depth algorithm 
-        // to character VS character sorting (fixes party follower overlapping). 
-        // Map Tiles often rely on orthodox Y-sorting for their specific assets.
         const isCharA = !!a._character;
         const isCharB = !!b._character;
-        // if (isCharA && isCharB) {
         const aX = (a._sortX !== undefined) ? a._sortX : a.x;
         const bX = (b._sortX !== undefined) ? b._sortX : b.x;
         aDepth = aX + aY;
         bDepth = bX + bY;
-        // }
     }
 
     if (aDepth !== bDepth) {
         return aDepth - bDepth;
     }
 
-    // Stable sort using unique spriteId
     return a.spriteId - b.spriteId;
 };
 
-Tilemap.prototype._processHighTile = function (tileId, dx, dy, mx, my) {
-    if (tileId === 0) return;
+Tilemap.prototype._processHighTile = function (tileId, dx, dy, mx, my, regionId, layerIndex) {
+    if (tileId === 0) return false;
 
-    // Check height flag (High 4 bits)
-    const flag = this.flags[tileId] >> 12;
-
-    if (flag > 0) {
-        // It's a high tile -> Create Sprite
-        this._addDynamicTile(tileId, mx, my, flag);
+    let height = 0;
+    if (layerIndex < 2) {
+        height = regionId % 10;
     } else {
-        // Standard handling
-        if (this._isHigherTile(tileId)) {
-            this._addTile(this._upperLayer, tileId, dx, dy);
-        } else {
-            this._addTile(this._lowerLayer, tileId, dx, dy);
-        }
+        height = Math.floor(regionId / 10);
     }
+
+    if (height > 0) {
+        this._addDynamicTile(tileId, mx, my, height);
+        return true;
+    }
+    
+    return false;
 };
