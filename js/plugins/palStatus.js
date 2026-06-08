@@ -379,7 +379,7 @@
             { slotName: "Head", etypeId: 2, x: w - 386, y: -37, scale: 3 },
             { slotName: "Cape", etypeId: 4, x: w - 212, y: 81, scale: 3 },
             { slotName: "Body", etypeId: 3, x: w - 200, y: 266, scale: 3 },
-            { slotName: "Weapon", etypeId: 1, x: w - 348, y: 357, scale: 3 },
+            { slotName: "Weapon", etypeId: 1, x: w - 350, y: 361, scale: 3 },
             { slotName: "Foot", etypeId: 5, x: w - 530, y: 386, scale: 3 },
             { slotName: "Accessory", etypeId: 6, x: w - 710, y: 338, scale: 3 }
         ];
