@@ -16,8 +16,8 @@ null,
 {"id":14,"flags":[16,1536,1536,1536,1536,1536,1536,1536,1551],"mode":1,"name":"水月宫-外观","note":"","tilesetNames":["","","","","Manual_Comp_001","Manual_Comp_016","Manual_Comp_012","Manual_Comp_017","Manual_Comp_019"]},
 {"id":15,"flags":[16,1536,1536,1536,1536,1536,1536,1536,1551],"mode":1,"name":"水月宫-内部","note":"","tilesetNames":["","","","","Manual_Comp_006","Manual_Comp_017","Manual_Comp_020","Manual_Comp_021",""]},
 {"id":16,"flags":[16,1536,1536,1536,1536,1536,1536,1536,1551],"mode":1,"name":"豪宅-内部","note":"","tilesetNames":["","","","","Manual_Comp_006","Manual_Comp_023","Manual_Comp_008","Manual_Comp_009","Manual_Comp_022"]},
-{"id":17,"flags":[16],"mode":1,"name":"","note":"","tilesetNames":["","","","","","","","",""]},
-{"id":18,"flags":[16],"mode":1,"name":"","note":"","tilesetNames":["","","","","","","","",""]},
-{"id":19,"flags":[16],"mode":1,"name":"","note":"","tilesetNames":["","","","","","","","",""]},
-{"id":20,"flags":[16],"mode":1,"name":"","note":"","tilesetNames":["","","","","","","","",""]}
+{"id":17,"flags":[16,1536,1536,1536,1536,1536,1536,1536,1551],"mode":1,"name":"盛渔村-内部2","note":"","tilesetNames":["","","","","Manual_Comp_006","Manual_Comp_023","Manual_Comp_007","Manual_Comp_009","Manual_Comp_024"]},
+{"id":18,"flags":[16,1536,1536,1536,1536,1536,1536,1536,1551],"mode":1,"name":"盛渔村药房-内部","note":"","tilesetNames":["","","","","Manual_Comp_006","Manual_Comp_007","Manual_Comp_008","Manual_Comp_009","Manual_Comp_025"]},
+{"id":19,"flags":[16,null,null,null,null,null,null,null,1551],"mode":1,"name":"林家堡后院","note":"","tilesetNames":["","","","","Manual_Comp_001","Manual_Comp_017","Manual_Comp_022","Manual_Comp_026","Manual_Comp_027"]},
+{"id":20,"flags":[16,null,null,null,null,null,null,null,1551],"mode":1,"name":"桃花源林","note":"","tilesetNames":["","","","","Manual_Comp_001","Manual_Comp_027","Manual_Comp_028","",""]}
 ]
