@@ -320,3 +320,31 @@
     };
 
 })();
+
+/*:
+ * @target MZ
+ * @plugindesc 允许在相邻格子按确定键触发没有精灵图（低于角色/高于角色）的事件。
+ * @author Antigravity
+ * 
+ * @help
+ * 恢复/修改 RMMZ 默认的触发逻辑：
+ * 只要事件的触发条件是“按确定键”，无论事件是否有精灵图
+ * （即无论优先级是低于角色、同层还是高于角色），
+ * 玩家只要站在它周围一格面向它，按下确定键即可触发。
+ */
+(() => {
+    // 覆盖默认的面前事件触发检测
+    Game_Player.prototype.startMapEvent = function(x, y, triggers, normal) {
+        if (!$gameMap.isEventRunning()) {
+            for (const event of $gameMap.eventsXy(x, y)) {
+                if (event.isTriggerIn(triggers)) {
+                    // 核心修改：如果事件本身的触发条件是“按确定键(0)”，则无视优先级判断直接触发。
+                    // 否则依然保留原有的优先级(normal)逻辑。
+                    if (event.isNormalPriority() === normal || event.isTriggerIn([0])) {
+                        event.start();
+                    }
+                }
+            }
+        }
+    };
+})();
