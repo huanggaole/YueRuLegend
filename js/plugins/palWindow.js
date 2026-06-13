@@ -1,4 +1,4 @@
-﻿/*:
+/*:
  * @target MZ
  * @plugindesc Chinese Paladin Window Base & Title Command
  * @author AI Assistant
@@ -528,20 +528,20 @@
         for (let i = 0; i < goldString.length; i++) {
             const digit = parseInt(goldString[i]);
             const img = this._numberImages[digit];
-            totalWidth += (img.width * 2) + spacing;
+            totalWidth += (img.width * 3) + spacing;
         }
 
         let currentX = width - totalWidth - 30; // Right aligned with padding
         if (this._numberImages.length > 0 && this._numberImages[0]) {
-            const imgH = this._numberImages[0].height * 2;
+            const imgH = this._numberImages[0].height * 3;
             const numY = (height - imgH) / 2;
 
             for (let i = 0; i < goldString.length; i++) {
                 const digit = parseInt(goldString[i]);
                 const img = this._numberImages[digit];
                 // Blt to custom bitmap
-                bitmap.blt(img, 0, 0, img.width, img.height, currentX, numY, img.width * 2, img.height * 2);
-                currentX += (img.width * 2) + spacing;
+                bitmap.blt(img, 0, 0, img.width, img.height, currentX, numY, img.width * 3, img.height * 3);
+                currentX += (img.width * 3) + spacing;
             }
         }
     };

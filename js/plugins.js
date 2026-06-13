@@ -11,5 +11,6 @@ var $plugins =
 {"name":"palItemList","status":true,"description":"Chinese Paladin Item List UI","parameters":{}},
 {"name":"palMagic","status":true,"description":"Chinese Paladin Magic List UI","parameters":{}},
 {"name":"palBattle","status":true,"description":"[v1.0] Chinese Paladin 98 Battle System & UI","parameters":{}},
-{"name":"PAL98_Dialogue","status":true,"description":"[v2.0] 仙剑98柔情版 文字对话样式 | PAL98 Classic Dialogue System","parameters":{"FontSize":"48","LineHeight":"54","TitleColor":"#38c0a8","BodyColor":"#ffffff","ShadowOffsetX":"2","ShadowOffsetY":"2","FaceScale":"3","DialogueRegionHeight":"180","TopFaceX":"-66","TopFaceY":"-66","BottomFaceX":"-66","BottomFaceY":"-66","TopTextX":"-132","TopTextY":"0","BottomTextX":"0","BottomTextY":"66"}}
+{"name":"PAL98_Dialogue","status":true,"description":"[v2.0] 仙剑98柔情版 文字对话样式 | PAL98 Classic Dialogue System","parameters":{"FontSize":"48","LineHeight":"54","TitleColor":"#38c0a8","BodyColor":"#ffffff","ShadowOffsetX":"2","ShadowOffsetY":"2","FaceScale":"3","DialogueRegionHeight":"180","TopFaceX":"-66","TopFaceY":"-66","BottomFaceX":"-66","BottomFaceY":"-66","TopTextX":"-132","TopTextY":"0","BottomTextX":"0","BottomTextY":"66"}},
+{"name":"palShop","status":true,"description":"Chinese Paladin Shop UI","parameters":{}}
 ];
