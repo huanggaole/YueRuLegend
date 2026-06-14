@@ -259,7 +259,8 @@
         // This looks like Current / Target.
 
         this.drawPalNumber(currentExp, valueX, startY - 10, 'white');
-        this.drawPalNumber(this._actor.nextRequiredExp(), valueX, startY + 14, 'green');
+        const expForCurrentLevel = this._actor.nextLevelExp() - this._actor.currentLevelExp();
+        this.drawPalNumber(expForCurrentLevel, valueX, startY + 14, 'green');
 
 
         // 2. Level (修行)
