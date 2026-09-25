@@ -1,4 +1,4 @@
-﻿/*:
+/*:
  * @target MZ
  * @plugindesc [v1.7] Chinese Paladin 98 Battle System & UI
  * @author AI Assistant
@@ -33,8 +33,8 @@
         this._buttonData = [
             { x: 81, y: 420, img: 'Data940', symbol: 'attack' }, // Top
             { x: 0, y: 465, img: 'Data941', symbol: 'skill' },   // Left
-            { x: 81, y: 510, img: 'Data943', symbol: 'escape' }, // Bottom
-            { x: 162, y: 465, img: 'Data942', symbol: 'item' }   // Right
+            { x: 81, y: 510, img: 'Data943', symbol: 'misc' },  // Bottom（原版杂项：围攻/道具/防御/逃跑/状态）
+            { x: 162, y: 465, img: 'Data942', symbol: 'coop' }   // Right（原版合体技；图标为双人）
         ];
 
         for (let i = 0; i < 4; i++) {
@@ -54,13 +54,16 @@
         if (!this._actor) return;
         const canAttack = this._actor ? this._actor.canAttack() : false;
         const canSkill = this._actor ? this._actor.canMove() : false;
-        const canItem = this._actor ? this._actor.canMove() : false;
+        // 合体技：装备挂载 + 全员体力≥1/5 且无眠/乱/封/定（palBattleCoop）
+        const canCoop = !!(window.PalBattleCoop && PalBattleCoop.canUse(this._actor));
+        // 杂项菜单（围攻/道具/防御/逃跑/状态，palBattleMisc）
+        const canMisc = this._actor ? this._actor.canMove() : false;
 
         // Index: 0=Top, 1=Left, 2=Bottom, 3=Right
         this.addCommand(TextManager.attack, "attack", canAttack);
         this.addCommand(TextManager.skill, "skill", canSkill);
-        this.addCommand(TextManager.escape, "escape", BattleManager.canEscape());
-        this.addCommand(TextManager.item, "item", canItem);
+        this.addCommand("杂项", "misc", canMisc);
+        this.addCommand("合体", "coop", canCoop);
     };
 
     Window_ActorCommand.prototype.setup = function (actor) {
@@ -165,12 +168,6 @@
         if (this.isCommandEnabled(i)) {
             this.playOkSound();
             this.updateInputData();
-            const symbol = this.commandSymbol(i);
-            if (symbol === 'escape') {
-                BattleManager.processEscape();
-                this.deactivate();
-                return;
-            }
             this.callOkHandler();
         } else {
             this.playBuzzerSound();
@@ -567,7 +564,6 @@
 
     const _Window_BattleActor_select = Window_BattleActor.prototype.select;
     Window_BattleActor.prototype.select = function (index) {
-        console.error("Window_BattleActor_select", index);
         _Window_BattleActor_select.call(this, index);
         if (index >= 0 && index < $gameParty.battleMembers().length) {
             Pal98IndicatorManager.showYellowTriangle($gameParty.battleMembers()[index]);
