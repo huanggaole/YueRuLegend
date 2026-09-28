@@ -439,4 +439,11 @@
         this.drawText(text, x, y, maxWidth, align);
     };
 
+    //-----------------------------------------------------------------------------
+    // 导出：供战斗内「状态」复用（palBattleMisc.js 用 Window_PalStatus 做战斗内叠加面板，
+    // 而不是 SceneManager.push(Scene_PalStatus) 把战斗场景顶掉）
+    //-----------------------------------------------------------------------------
+    window.Scene_PalStatus = Scene_PalStatus;
+    window.Window_PalStatus = Window_PalStatus;
+
 })();

@@ -12,6 +12,8 @@ var $plugins =
 {"name":"palMagic","status":true,"description":"Chinese Paladin Magic List UI","parameters":{}},
 {"name":"palBattle","status":true,"description":"[v1.0] Chinese Paladin 98 Battle System & UI","parameters":{}},
 {"name":"palBattleCore","status":true,"description":"[v1.0] 仙剑98柔情版战斗核心机制（五行/伤害公式/逃跑/中毒/AI）","parameters":{"defaultBattleback":"Fbp_10-1","poisonRate":"16"}},
+{"name":"palPoison","status":true,"description":"[v1.0] 仙剑98柔情版中毒系统（阶梯扣血/暴毙/蛊相克即死/养蛊产出/毒与物品绑定）","parameters":{}},
+{"name":"palBattleSkillFx","status":true,"description":"[v1.0] 仙剑98柔情版仙术脚本效果（下毒/即死/昏睡/疯魔/复活/解毒/增益）","parameters":{}},
 {"name":"palBattleAnim","status":true,"description":"[v1.0] 仙剑98柔情版战斗动画（敌我帧序列复刻）","parameters":{}},
 {"name":"palBattleTarget","status":true,"description":"[v1.0] 仙剑98柔情版目标选择（隐藏敌人列表/闪白指示/冻结指令光标）","parameters":{}},
 {"name":"palBattleDamage","status":true,"description":"[v1.0] 仙剑98柔情版伤害数字（白色伤害/绿色回血/蓝色回MP图片拼合）","parameters":{}},
@@ -20,6 +22,8 @@ var $plugins =
 {"name":"palBattleMagic","status":true,"description":"[v1.0] 仙剑98柔情版战斗法术动画（特效序列帧/吹飞位移/扭曲/受击颤抖/结算时序）","parameters":{}},
 {"name":"palBattleCoop","status":true,"description":"[v1.0] 仙剑98柔情版合体技（装备挂载/全员扣体力/合力伤害/列队施法演出）","parameters":{}},
 {"name":"palBattleMisc","status":true,"description":"[v1.0] 仙剑98柔情版战斗杂项菜单（九宫格子菜单：围攻/道具/防御/逃跑/状态）","parameters":{}},
+{"name":"palBattleConfuse","status":true,"description":"[v1.0] 仙剑98柔情版混乱状态攻击队友（fight.c 1308/1743/3448/3760）","parameters":{}},
+{"name":"palBattleSe","status":true,"description":"[v1.0] 仙剑98柔情版战斗音效（按 sdlpal fight.c 时机接入 sfxNNN）","parameters":{"volume":"90","muteDefaultSe":"true"}},
 {"name":"PAL98_Dialogue","status":true,"description":"[v2.0] 仙剑98柔情版 文字对话样式 | PAL98 Classic Dialogue System","parameters":{"FontSize":"48","LineHeight":"54","TitleColor":"#38c0a8","BodyColor":"#ffffff","ShadowOffsetX":"2","ShadowOffsetY":"2","FaceScale":"3","DialogueRegionHeight":"180","TopFaceX":"-66","TopFaceY":"-66","BottomFaceX":"-66","BottomFaceY":"-66","TopTextX":"-132","TopTextY":"0","BottomTextX":"0","BottomTextY":"66"}},
 {"name":"palShop","status":true,"description":"Chinese Paladin Shop UI","parameters":{}},
 {"name":"palExperience","status":true,"description":"","parameters":{}}

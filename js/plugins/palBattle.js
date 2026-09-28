@@ -197,9 +197,18 @@
         this._renderSprite = new Sprite();
         this.addChildAt(this._renderSprite, 0); // 放在底层
 
+        this.refresh();  // 上面那次同步 refresh 被挡住了，这里补一次正常的
     };
 
     Window_BattleStatus.prototype.refresh = function () {
+        // ⚠ 初始化未完成时直接返回。
+        // MZ 的 preparePartyRefresh() 在 initialize 内部就会 addLoadListener()，
+        // 而 Bitmap.addLoadListener 对【已缓存】的图是同步回调 —— 第二次进战斗时
+        // 图都在缓存里，于是 refresh() 会在下面 _images / _renderSprite 赋值之前
+        // 被调进来，报 "Cannot read properties of undefined (reading 'some')"，
+        // 直接把 createAllWindows 打断（战斗窗口全没了）。
+        if (!this._images || !this._renderSprite) return;
+
         Window_StatusBase.prototype.refresh.call(this);
 
         const members = $gameParty.battleMembers();
@@ -551,6 +560,25 @@
     Spriteset_Battle.prototype.createBattleField = function () {
         _Spriteset_Battle_createBattleField.call(this);
         Pal98IndicatorManager.initialize(this._battleField);
+        // D1/D11：原版战斗精灵每帧按 Y 排序后绘制（battle.c 409-470），
+        // Y 小者先画 = 被压在后面；Y 相同再比 X（X 大者先画）。
+        // MZ 默认按 addChild 顺序固定（敌人创建时按 x 排一次），走位时不会换层，
+        // 于是合体技里 2/3 号位发动时的前后关系与原版相反 —— 这里改用 zIndex 排序。
+        this._battleField.sortableChildren = true;
+        if (this._backSprite) this._backSprite.z = -1; // 背景永远垫底
+    };
+
+    // D1/D11：每帧把 Y 写进 zIndex（敌人、我方、仙术特效同属一个排序池）
+    const _Spriteset_Battle_update = Spriteset_Battle.prototype.update;
+    Spriteset_Battle.prototype.update = function () {
+        _Spriteset_Battle_update.call(this);
+        if (!this._battleField) return;
+        for (const s of this.battlerSprites()) s.z = s.y;
+        for (const c of this._battleField.children) {
+            // 未显式设层级的（仙术特效等）也按自己的 Y 参与排序；
+            // 指示器 z=9999、背景 z=-1 不受影响
+            if (c.z === undefined || c.z === 0) c.z = c.y;
+        }
     };
 
     // 重写战斗场景更新方法

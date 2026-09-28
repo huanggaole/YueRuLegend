@@ -30,12 +30,23 @@
  *   二次攻击武器（玄冥宝刀，特征码34 攻击次数+1/fight.c 3628 的 kStatusDualAttack）：
  *   打两轮完整序列；全体攻击武器（<AOE> 备注：长鞭/九截鞭/金蛇鞭/玄冥宝刀，
  *   原版装备脚本写 rgwAttackAll=1）只探身原地挥砍、打击敌方全体且免选目标。
- * Miss/闪避（fight.c 4938/5023-5027）：无“Miss”字样，被打者摆防御姿势帧3，
- *   我方闪避者再向后小闪一步（原版无位移，此处为手感增强）。
+ * Miss/自动格挡（fight.c 4938 / 5023-5027 / 5097-5112）：无“Miss”字样，被打者摆
+ *   防御姿势帧3，并和真被打中一样后退一步 —— 原版是 (+8,+4) 再 (+2,+1)，合计
+ *   (+10,+5) PAL 单位（本工程 960×600 = PAL 320×200 ×3 → +30,+15）。
+ *   注：后退量受击与格挡【完全相同】，iCoverIndex != -1（被队友掩护）时才走另一套。
  * 我方施法（fight.c 2363-2444）：前移4小步(共-30,-12) → 帧5吟唱(约10战斗帧) → 帧6释放。
  * 我用物品（fight.c 2289-2335）：前移(-45,-21) → 帧5 → 目标颜色闪烁。
- * 我方受击（fight.c 4861-5125）：帧4 + 击退(+27,+14再归位) + 红色闪烁；
+ * 我方受击（fight.c 4861-5125）：帧4 + 击退(+30,+15再归位) + 红色闪烁；
  *   死亡后固定帧2；濒死(HP < min(100, maxHP/5)，fight.c 47-48)固定帧1。
+ *
+ * 受击/格挡表现链：palBattle.js 为了去掉 "Miss"/伤害文字，把 displayMiss /
+ *   displayEvasion / displayHpDamage 整个清空，连带把 MZ 日志队列里的 performMiss /
+ *   performEvasion / performDamage / performRecovery 一起干掉了 —— 于是我方没有受伤帧、
+ *   敌人挨打没有红闪、Miss 也没有格挡姿势。本插件改为 override displayDamage 同步
+ *   触发动作（不走日志队列，避免被 wait 拆成逐个），文字一律不产生。
+ *
+ * 运行时调参：window.PAL98_ANIM（后退位移/保持时长/格挡姿势时长），
+ *   控制台 PAL98.setStepBack(x, y, holdMs) / PAL98.setBlockPose(ms)。
  *
  * 其它：伤害数字延迟到命中帧弹出；防御(Guard)使用运行时伪技能999，挂状态2
  * （状态2自带“防御”特殊特征，防御力×2，与原版一致），行动开始时解除。
@@ -55,6 +66,50 @@
     const AF = {
         IDLE: 0, SLEEP: 1, DEAD: 2, GUARD: 3, HURT: 4,
         CHANT: 5, CAST: 6, PREP: 7, ATK1: 8, ATK2: 9, WIN: 10
+    };
+
+    //=============================================================================
+    // 受击 / 格挡 的位移与时长（集中暴露，可运行时调）
+    //=============================================================================
+    // stepBack：fight.c 5097-5112 —— 命中或被格挡后 (PAL +8,+4) 再 (PAL +2,+1)，
+    //   合计 (+10,+5) PAL 单位；本工程 960×600 = PAL 320×200 ×3 → (+30,+15)。
+    //   受击与格挡完全相同；"被队友掩护"时受击者不动，改由掩护者走位（见 PAL98_COVER）。
+    const PAL98_ANIM = window.PAL98_ANIM = {
+        stepBack: [30, 15],       // 后退位移（px，相对 home）
+        stepBackFrames: 3,        // 后退位移帧数
+        stepBackHoldMs: 200,      // 后退后保持多久开始回位（原版约 5 战斗帧 = 200ms）
+        returnFrames: 10,         // 回位动画帧数
+        blockPoseMs: 240          // 格挡姿势（帧3）持续时间 = 6 战斗帧
+    };
+    const PAL98 = window.PAL98 = window.PAL98 || {};
+    PAL98.setStepBack = function (x, y, holdMs) {
+        PAL98_ANIM.stepBack = [Number(x) || 0, Number(y) || 0];
+        if (holdMs !== undefined) PAL98_ANIM.stepBackHoldMs = Number(holdMs) || 0;
+        return PAL98_ANIM.stepBack.slice();
+    };
+    PAL98.setBlockPose = function (ms) {
+        PAL98_ANIM.blockPoseMs = Number(ms) || 0;
+        return PAL98_ANIM.blockPoseMs;
+    };
+
+    //=============================================================================
+    // 队友掩护的走位与时长（fight.c 5012-5027 / 5090-5098）
+    //   offset  掩护者站到「受击者脚底 -24,-12」PAL 单位（fight.c 5018-5021）
+    //   nudge   命中瞬间掩护者再 (+4,+2) PAL（fight.c 5095-5097）—— 已并入 hold 前
+    //   enemyRecoil 敌人被挡下的反震 (-10,-8) PAL，持续 1 战斗帧（fight.c 5092-5094）
+    //=============================================================================
+    const PAL98_COVER = window.PAL98_COVER = {
+        offset: [24, 12],      // PAL 单位
+        inMs: 160,             // 走到位所需时间
+        holdMs: 260,           // 到位后保持多久开始归位
+        guardMs: 320,          // 防御姿势（帧3）持续
+        enemyRecoil: [-10, -8] // PAL 单位
+    };
+    PAL98.setCover = function (offset, inMs, holdMs) {
+        if (Array.isArray(offset)) PAL98_COVER.offset = offset.map(Number);
+        if (inMs !== undefined) PAL98_COVER.inMs = Number(inMs) || 0;
+        if (holdMs !== undefined) PAL98_COVER.holdMs = Number(holdMs) || 0;
+        return PAL98_COVER;
     };
 
     // 每个角色战斗精灵的实际帧文件数（img/sv_actors/<id>-*.png 盘点结果）
@@ -347,6 +402,14 @@
         _Sprite_Enemy_update.call(this);
         updateSeq(this, dt);
         const b = this._enemy;
+        // 被队友挡下时的反震（fight.c 5092-5094：pos -= (10,8)，持续 1 战斗帧）
+        if (b && b._palRecoilAt) {
+            const e = t - b._palRecoilAt;
+            if (e >= 0 && e < BATTLE_MS) {
+                this.x += PAL98_COVER.enemyRecoil[0] * 3;
+                this.y += PAL98_COVER.enemyRecoil[1] * 3;
+            }
+        }
         const dead = !!(b && b.isDead && b.isDead());
         // 死亡表现（原地渐隐）启动后，受击红闪立即让位；此前红闪正常播放。
         const deathFading = dead && !PalBattleAnim.isBusy(this) &&
@@ -444,32 +507,70 @@
         this._palPrevT = t;
         _Sprite_Actor_update.call(this);
         updateSeq(this, this._palDt);
-        // 受击击退（每段伤害触发一次）
+        // 受击 / 自动格挡 后退一步（fight.c 5097-5112：(+8,+4) 再 (+2,+1) PAL 单位）
+        // 原版两种情形位移完全相同：都是 (+10,+5) PAL = (+30,+15) px，随后归位。
         const a = this._actor;
         if (a && a._palHurtAt && t >= a._palHurtAt && this._palHurtStamp !== a._palHurtAt && a.hp > 0 && !a.isDead()) {
             this._palHurtStamp = a._palHurtAt;
-            this.startMove(27, 14, 3);           // (+8,+4) PAL 单位
-            this._palHurtReturnAt = t + 130;
+            this.startMove(PAL98_ANIM.stepBack[0], PAL98_ANIM.stepBack[1], PAL98_ANIM.stepBackFrames);
+            this._palHurtReturnAt = t + PAL98_ANIM.stepBackHoldMs;
         }
         if (this._palHurtReturnAt && t > this._palHurtReturnAt && !PalBattleAnim.isBusy(this)) {
-            this.startMove(0, 0, 10);
+            this.startMove(0, 0, PAL98_ANIM.returnFrames);
             this._palHurtReturnAt = 0;
         }
-        // 闪避后闪（与受击击退同向、幅度更小）
+        // 自动格挡（Miss/闪避）：摆防御姿势帧3 + 同样后退一步（fight.c 5023-5027 / 5097-5112）
         if (a && a._palDodgeAt && this._palDodgeStamp !== a._palDodgeAt && a.hp > 0 && !a.isDead()) {
             this._palDodgeStamp = a._palDodgeAt;
-            this.startMove(16, 8, 3);
-            this._palDodgeReturnAt = t + 140;
+            this.startMove(PAL98_ANIM.stepBack[0], PAL98_ANIM.stepBack[1], PAL98_ANIM.stepBackFrames);
+            this._palDodgeReturnAt = t + PAL98_ANIM.stepBackHoldMs;
         }
         if (this._palDodgeReturnAt && t > this._palDodgeReturnAt && !PalBattleAnim.isBusy(this)) {
-            this.startMove(0, 0, 8);
+            this.startMove(0, 0, PAL98_ANIM.returnFrames);
             this._palDodgeReturnAt = 0;
+        }
+        // 队友掩护（fight.c 5012-5027）：挪到受击者身前 + 防御姿势，随后归位。
+        // _palCoverAt 支持未来时刻 —— 让掩护者刚好在敌人落刀那一刻到位。
+        if (a && a._palCoverAt && t >= a._palCoverAt &&
+            this._palCoverStamp !== a._palCoverAt && a.hp > 0 && !a.isDead()) {
+            this._palCoverStamp = a._palCoverAt;
+            this.startMove(a._palCoverX || 0, a._palCoverY || 0, ticks(PAL98_COVER.inMs));
+            if (a._palCoverSe) {
+                PalBattleCore.playPalSe(a._palCoverSe); // rgwCoverSound（fight.c 5014）
+                a._palCoverSe = 0;
+            }
+            this._palCoverReturnAt = t + PAL98_COVER.inMs + PAL98_COVER.holdMs;
+        }
+        if (this._palCoverReturnAt && t > this._palCoverReturnAt && !PalBattleAnim.isBusy(this)) {
+            this.startMove(0, 0, PAL98_ANIM.returnFrames);
+            this._palCoverReturnAt = 0;
         }
     };
 
+    // 项目里 img/sv_actors/ 下的文件【全部】是 PAL 帧组格式（<组>-<帧>.png，如 3-1.png），
+    // 不存在 MZ 默认的 SV 立绘。所以"非 PAL 角色回退 MZ 原逻辑"这条分支只会去
+    // loadSvActor("Actor1_2") → 404；而 MZ 的 ResourceHandler 一旦失败就调
+    // Graphics.printError 弹出 "Failed to load" 错误层，把整个游戏画面挡住。
+    // 初始队伍是 [3,7,8]，姬三娘/柳媚娘的 battlerName 还是 MZ 编辑器默认残留值
+    // （Actor1_2 / Actor1_3）→ 新开游戏第一场战斗就必现。
+    // 默认关掉这条回退：立绘留空 + 控制台一条 warn。
+    // 哪天真要做 MZ SV 立绘，把开关打开（同时把 battlerName 改成真实存在的文件名）。
+    const FALLBACK_SV_ACTOR = false;
+
     Sprite_Actor.prototype.updateBitmap = function () {
-        // 帧完全由 updateFrame 管理（PAL 角色）；非 PAL 角色回退原逻辑
+        // 帧完全由 updateFrame 管理（PAL 角色）；非 PAL 角色按上面的开关决定是否回退
         if (this._actor && !frameBase(this._actor.battlerName())) {
+            if (!FALLBACK_SV_ACTOR) {
+                const name = this._actor.battlerName();
+                if (name && this._warnedSvName !== name) {
+                    this._warnedSvName = name;
+                    console.warn("[palBattleAnim] 角色 " + this._actor.actorId() +
+                        "（" + this._actor.name() + "）battlerName=" + name +
+                        " 不是 PAL 帧组格式（应形如 3-1），项目也没有 MZ SV 立绘 → " +
+                        "战斗中该角色立绘为空。请到 Actors.json 把 battlerName 配成 PAL 帧组。");
+                }
+                return;
+            }
             Sprite_Battler.prototype.updateBitmap.call(this);
             const name = this._actor.battlerName();
             if (this._battlerName !== name) {
@@ -506,8 +607,10 @@
             f = AF.SLEEP; // 昏睡 / 濒死（HP < min(100, maxHP/5)，fight.c 47-48）
         } else if (a.isStateAffected(GUARD_STATE_ID)) {
             f = AF.GUARD;
-        } else if (a._palDodgeAt && t - a._palDodgeAt < 6 * BATTLE_MS) {
-            f = AF.GUARD; // 自动防御闪避姿势（fight.c 5023-5027）
+        } else if (a._palGuardAt && t >= a._palGuardAt && t - a._palGuardAt < PAL98_COVER.guardMs) {
+            f = AF.GUARD; // 队友掩护姿势（fight.c 5016：wCurrentFrame = 3）
+        } else if (a._palDodgeAt && t - a._palDodgeAt < PAL98_ANIM.blockPoseMs) {
+            f = AF.GUARD; // 自动格挡姿势（fight.c 5023-5027：wCurrentFrame = 3）
         } else if (a._palHurtAt && t >= a._palHurtAt && t - a._palHurtAt < 6 * BATTLE_MS) {
             f = AF.HURT;
         }
@@ -523,6 +626,11 @@
         if (!frameBase(this.battlerName())) return; // 客串角色保持默认
         const sprite = PalBattleAnim.spriteOf(this);
         if (!sprite) return;
+        // 把本次动作绑到【施法者自己的精灵】上。
+        // BattleManager._action 是全局的，CTB 下多名角色可能同时处于行动中，
+        // 后者的 _action 会覆盖前者 —— 于是后一位施法者放的是前一位的法术特效
+        // （症状：赵灵儿对敌放回梦、林月如对自己放凝神归元，林月如却放回梦）。
+        sprite._palCastAction = action;
         if (action.isAttack()) {
             PalBattleAnim.runActorAttack(this, sprite);
         } else if (action.isGuard()) {
@@ -564,8 +672,32 @@
     };
 
     //=============================================================================
-    // Miss / 闪避：不显示“Miss”字样（原版被打者摆自动防御姿势帧3，无任何文字，
-    // fight.c 5023-5027）；我方闪避者额外向后小闪一步（手感增强，原版无位移）
+    // 受击 / 格挡 / 恢复 的表现链（fight.c 5023-5027 / 5056-5078 / 5097-5112）
+    //
+    // palBattle.js 把 displayMiss / displayEvasion / displayHpDamage 整个清空以去掉
+    // "Miss"、伤害数字等文字，结果 MZ 日志队列里的 performMiss / performEvasion /
+    // performDamage / performRecovery 也一起被干掉了 —— 我方没有受伤帧与击退、
+    // 敌人挨打没有红闪与颤抖、Miss 也没有格挡姿势。
+    // 这里改为 override displayDamage 直接同步触发动作：不打任何文字，也不进日志队列
+    //（日志队列每条之间会插入 wait，会把群体攻击的受击表现拆成逐个播放）。
+    //=============================================================================
+
+    Window_BattleLog.prototype.displayDamage = function (target) {
+        const result = target.result();
+        if (result.missed) {
+            // 原版没有 "Miss" 文字：被打者摆自动防御姿势帧3（Game_Actor.performMiss）
+            if (result.physical) target.performMiss();
+        } else if (result.evaded) {
+            if (result.physical) target.performEvasion();
+            else target.performMagicEvasion();
+        } else if (result.hpAffected) {
+            if (result.hpDamage > 0 && !result.drain) target.performDamage();
+            if (result.hpDamage < 0) target.performRecovery();
+        }
+    };
+
+    //=============================================================================
+    // Miss / 闪避（fight.c 4938 / 5023-5027）
     //=============================================================================
 
     Game_Actor.prototype.performMiss = function () {
@@ -583,6 +715,32 @@
         this._palDodgeAt = now();
     };
 
+    //=============================================================================
+    // 队友掩护：掩护者走位 + 防御姿势 + 掩护音效；敌人被挡下的反震
+    // 判定时机由 palBattleCore.Game_Action#apply 决定，这里只做演出
+    //=============================================================================
+
+    PalBattleAnim.runCover = function (enemy, target, coverer) {
+        const cs = PalBattleAnim.spriteOf(coverer);
+        const ts = PalBattleAnim.spriteOf(target);
+        const es = PalBattleAnim.spriteOf(enemy);
+        // 让掩护者刚好在敌人落刀那一刻到位：以命中时刻倒推走位时长
+        const lead = PalBattleAnim.popupDelay ? PalBattleAnim.popupDelay() : 0;
+        const at = now() + Math.max(0, lead - PAL98_COVER.inMs);
+        if (cs) {
+            const tx = ts ? ts._homeX : cs._homeX;
+            const ty = ts ? ts._homeY : cs._homeY;
+            coverer._palCoverX = tx - PAL98_COVER.offset[0] * 3 - cs._homeX;
+            coverer._palCoverY = ty - PAL98_COVER.offset[1] * 3 - cs._homeY;
+        }
+        coverer._palCoverAt = at;
+        coverer._palGuardAt = at;                       // 防御姿势（帧3）
+        coverer._palCoverSe = PalBattleCore.noteTag(coverer, "coverSound");
+        // 敌人被挡下的反震（fight.c 5092-5094：pos -= (10,8)，1 战斗帧后归位）
+        if (es && enemy) enemy._palRecoilAt = at + PAL98_COVER.inMs;
+        // 受击者：原版完全不动、不变帧（fight.c 5118 / 5088 都在 iCoverIndex==-1 分支里）
+    };
+
     // 闪避不弹“Miss”文字（原版完全没有提示；敌我一致）
     Game_Battler.prototype.shouldPopupDamage = function () {
         const result = this._result;
@@ -598,6 +756,7 @@
         Game_Battler.prototype.performAction.call(this, action);
         const sprite = PalBattleAnim.spriteOf(this);
         if (!sprite) return;
+        sprite._palCastAction = action; // 同上：特效取自己的动作，不用全局 _action
         const meta = enemyAnimMeta(this);
         if (!meta) return;
         const isPalMagic = action.isSkill() && action.item() && PalBattleCore.parseMeta(action.item());
@@ -669,12 +828,16 @@
         _startDamagePopup.call(this);
     };
 
-    // 命中时刻估算：敌方普攻在攻击帧区开始时命中，我方普攻在挥砍帧(帧9)命中
+    // 命中时刻估算：敌方普攻在攻击帧区开始时命中，我方普攻在挥砍帧(帧9)命中；
+    // 仙术由 palBattleMagic 包一层（特效剩余时长），道具在序列跑完后（见下）
     PalBattleAnim.popupDelay = function () {
         if (BattleManager._phase !== "action") return 0;
         const subject = BattleManager._subject;
         const action = BattleManager._action;
-        if (!subject || !action || !action.isAttack || !action.isAttack()) return 0;
+        if (!subject || !action) return 0;
+        // 道具：buildActorItem 序列 4+1+12 帧跑完才执行脚本、再弹数字（fight.c:4369/4405）
+        if (action.isItem && action.isItem()) return 17 * BATTLE_MS;
+        if (!action.isAttack || !action.isAttack()) return 0;
         if (subject.isEnemy()) {
             const meta = enemyAnimMeta(subject);
             if (!meta) return 0;

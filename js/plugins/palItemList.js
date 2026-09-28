@@ -65,7 +65,22 @@
         const bgW = this._iconBg.width * scale;
         const bgH = this._iconBg.height * scale;
         const padX = 18;
-        const bgY = Math.max(0, this.contents.height - bgH) + 12; // 底部对齐
+
+        // 文案行（最多 3 行，颜色 #F7EB99）——先算好高度再统一排版，
+        // 原来图标框底部对齐再 +12、文字居中再 +30，两处硬偏移叠加后
+        // 在窗口高度不足时必然溢出底部（主字号 48 → lineHeight 56，
+        // 3 行本身就要 216px，180 高的窗口放不下，第 3 行被切掉）。
+        const desc = this._item ? (this._item.description || "") : "";
+        const lines = desc.replace(/\\n/g, '\n').split(/[\r\n]+/).slice(0, 3);
+        const lineSpacing = 16;
+        const textHeight = lines.length
+            ? this.lineHeight() * lines.length + lineSpacing * (lines.length - 1)
+            : 0;
+
+        // 图标框与文字整体在窗口内垂直居中，谁高按谁算，两边都不再额外下移
+        const blockHeight = Math.max(bgH, textHeight);
+        const blockTop = Math.max(0, (this.contents.height - blockHeight) / 2);
+        const bgY = blockTop + (blockHeight - bgH) / 2;
         this.contents.blt(this._iconBg, 0, 0, this._iconBg.width, this._iconBg.height, padX, bgY, bgW, bgH);
 
         if (!this._item) return;
@@ -87,16 +102,10 @@
         this.contents.blt(iconSet, sx, sy, pw, ph, iconX, iconY, iconW, iconH);
 
         // Draw Description
-        // Max 3 lines. Color #F7EB99
         this.contents.outlineWidth = 0; // Remove outline, use shadow instead
 
         const textX = padX + bgW + 16;
-        const lineSpacing = 24; // 行间距
-        const totalTextHeight = this.lineHeight() * 3 + lineSpacing * 2;
-        let textY = Math.max(0, (this.contents.height - totalTextHeight) / 2) + 30; // 垂直居中
-
-        const desc = this._item.description || "";
-        const lines = desc.replace(/\\n/g, '\n').split(/[\r\n]+/).slice(0, 3);
+        let textY = blockTop + (blockHeight - textHeight) / 2;
 
         for (let i = 0; i < lines.length; i++) {
             // Draw Shadow

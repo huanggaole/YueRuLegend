@@ -1,13 +1,15 @@
 /*:
  * @target MZ
- * @plugindesc [v1.0] 仙剑98柔情版战斗法术动画（特效序列帧/吹飞位移/扭曲/受击颤抖/结算时序）
+ * @plugindesc [v1.2] 仙剑98柔情版战斗法术动画（特效序列帧/按 wType 定位/吹飞位移/扭曲/受击颤抖/结算时序；可改用 RM 数据库动画）
  * @author AI Assistant
  *
  * @help
  * 复刻仙剑98柔情版施法完整流程（对照 sdlpal fight.c）：
  *  1. 施法者施法帧序列（palBattleAnim.js，吟唱→释放）；
- *  2. 释放点（施法序列中的 {spell:true} 步骤）触发本插件，在每个受法者身上
- *     播放法术特效序列帧：img/animations/<fx>-<帧>.png。
+ *  2. 释放点（施法序列中的 {spell:true} 步骤）触发本插件，播放法术特效序列帧：
+ *     img/animations/<fx>-<帧>.png。
+ *     ⚠ v1.2 修正：特效【不是】"每个受法者一份"，而是按原版 wType 决定摆几份、
+ *       摆在哪（见下方"特效摆放"一节）。这也是"全体仙术只放一次全屏动画"的来源。
  *     fx = FIRE.MKF 块号 = MAGIC.wEffect，参数内嵌 MAGIC_TABLE（来源
  *     D:\仙剑逆向拆解\Export\Data\Magics.csv）：
  *     每帧时长 (wSpeed+5)*10ms（fight.c 2729-2730）；
@@ -19,6 +21,27 @@
  *     · 敌方受法者：受击红闪 + 原地颤抖（-8/+4/-2 PAL 单位三帧缓动，
  *       fight.c 3208-3238 PAL_BattleShowPostMagicAnim）
  *  4. 特效播放期间不倒地、不渐隐（死亡判断推迟到动画之后，palBattleAnim 门控）。
+ *
+ * 【特效摆放】（fight.c 2742-2820 我方施法 / 2967-3046 敌方施法）
+ *   原版 wType（本表 entry[1]）决定摆几份、摆在哪，与"打了几个目标"无关：
+ *     0 Normal        1 份 → 唯一目标脚底 + (wXOffset, wYOffset)
+ *     1 AttackAll     3 份 → 固定三处（我方施法打敌方半场 / 敌方施法打我方半场）
+ *     2 AttackWhole   1 份 → 整屏一处（我方 120,100 / 敌方 240,150）
+ *     3 AttackField   1 份 → 场地一处（双方都是 160,200）
+ *     4 ApplyToPlayer 1 份 → 目标队友脚底
+ *     5 ApplyToParty  N 份 → 每个在场队友脚底各一份
+ *     6 / 9（召唤）    未在原版分支里处理 → 退回"跟随受法者"
+ *   v1.1 及以前一律按受法者逐个生成，于是 mtype 2/3 的全屏图会叠出 N 张
+ *   （5 个敌人 = 5 张 960×600 全屏动画同时播）。v1.2 按上表修正。
+ *
+ * 【可改用 RM 数据库动画】
+ *   想用数据库「动画」编辑器做的特效，给技能配上 animationId（或备注
+ *   <palAnim:ID>）即可，本插件会改用 $gameTemp.requestAnimation 播放一次
+ *   （position=3「画面」只播一份，其余按目标逐个），并跳过 FIRE.MKF 序列帧。
+ *   关闭开关：控制台 PalBattleMagic.useDbAnimation = false。
+ *   注意：MV 格式动画单元格固定 192×192、节奏固定 4 帧/格，表达不了原版
+ *   320×200 全屏序列帧和"火焰段循环/震屏/波纹"，所以默认仍走序列帧。
+ *
  * 特殊表现：
  *  · 风系攻击仙术（备注 elem=1 且伤害型）：受法者全程随机抖动位移并缓慢漂移
  *    （原版 iBlow，仙术脚本 0x006B "Blow away enemies"），结束归位；
@@ -46,8 +69,14 @@
 
     // PAL 坐标（320 空间）→ 屏幕像素换算
     const kPal = () => Graphics.boxWidth / 320;
-    // 特效帧图为 PAL 640 分辨率原生尺寸 → 屏幕等比
-    const kFx = () => Graphics.boxWidth / 640;
+
+    // 特效帧图倍率（v1.1）：与敌人精灵【同倍率】。
+    // 实测 img/animations 最大 320x200 = 原版整屏尺寸，说明特效帧图和敌人精灵
+    // 一样都是 320x200 原生分辨率导出，理应共用 kPal()（=3）。
+    // v1.0 误按 640 换算成 1.5，特效只有敌人的一半大 —— 这就是"仙术图片偏小"。
+    // 想微调（觉得偏大/偏小）可在控制台改：PalBattleMagic.fxScale = 0.8（下次播放生效）
+    PalBattleMagic.fxScale = 1;
+    const kFx = () => kPal() * PalBattleMagic.fxScale;
 
     function frameMsOf(entry) {
         return Math.max(40, (entry[4] + 5) * 10); // (wSpeed+5)*10ms（fight.c 2729）
@@ -70,6 +99,13 @@
 
     // 施法序列中释放点距序列开始的毫秒数（与 palBattleAnim 的 buildXxxMagic 严格一致）
     PalBattleMagic.castOffset = function (subject, meta) {
+        // D6 合体技的释放点不是标准施法序列的 16 帧，而是
+        // 走位 6 帧 + 其余参战者各 3 帧 + 发动者帧5(5) + 帧6(3) + OffMagicAnim 前 1 帧，
+        // 二/三人分别是 17 / 20 帧 —— 用错会让伤害结算与伤害数字早于特效 40~160ms。
+        const act = BattleManager._action;
+        if (act && act._palCoop && window.PalBattleCoop) {
+            return PalBattleCoop.coopIntroWaits() + 9 * BATTLE_MS;
+        }
         if (subject && subject.isEnemy && subject.isEnemy()) {
             const em = PalBattleCore.enemyMeta(subject);
             const magicFrames = em && em.frames ? (em.frames[1] || 0) : 0;
@@ -94,6 +130,73 @@
     };
 
     //=============================================================================
+    // 特效摆放（fight.c 2742-2820 我方施法 / 2967-3046 敌方施法）
+    //=============================================================================
+
+    // 固定落点，PAL 320×200 坐标（×kPal() 得屏幕像素；锚点为底部中心）
+    const EFFECTPOS = {
+        // 我方施法打敌人：fight.c 2766（AttackAll 三处）/ 2798（Whole）/ 2803（Field）
+        actor: {
+            all: [[70, 140], [100, 110], [160, 100]],
+            whole: [120, 100],
+            field: [160, 200]
+        },
+        // 敌方施法打我方：fight.c 2991 / 3023 / 3028
+        enemy: {
+            all: [[180, 180], [234, 170], [270, 146]],
+            whole: [240, 150],
+            field: [160, 200]
+        }
+    };
+    PalBattleMagic.EFFECTPOS = EFFECTPOS;
+
+    const MTYPE = { NORMAL: 0, ATTACK_ALL: 1, ATTACK_WHOLE: 2, ATTACK_FIELD: 3, APPLY_PLAYER: 4, APPLY_PARTY: 5 };
+
+    // 返回特效锚点数组：{x,y}（屏幕像素，固定落点）或 {sprite}（跟随受法者脚底）
+    PalBattleMagic.effectSpots = function (subject, entry, targets) {
+        const mtype = entry[1];
+        const xo = entry[2] || 0, yo = entry[3] || 0;
+        const byEnemy = !!(subject && subject.isEnemy && subject.isEnemy());
+        const table = byEnemy ? EFFECTPOS.enemy : EFFECTPOS.actor;
+        const fixed = pts => pts.map(p => ({ x: (p[0] + xo) * kPal(), y: (p[1] + yo) * kPal() }));
+        switch (mtype) {
+            case MTYPE.ATTACK_ALL: return fixed(table.all);   // 原版恒 3 份（MAX_BATTLE_MAGICSPRITE_ITEMS）
+            case MTYPE.ATTACK_WHOLE: return fixed([table.whole]);
+            case MTYPE.ATTACK_FIELD: return fixed([table.field]);
+            default: break;
+        }
+        // 其余（Normal / ApplyToPlayer / ApplyToParty / 召唤 …）跟随受法者
+        const out = [];
+        for (const t of targets || []) {
+            const s = PalBattleAnim.spriteOf(t);
+            if (s) out.push({ sprite: s });
+        }
+        return out;
+    };
+
+    //=============================================================================
+    // RM 数据库动画（$dataAnimations）可选通道
+    //=============================================================================
+
+    PalBattleMagic.useDbAnimation = true;
+
+    // 技能 → 数据库动画 ID；0 = 不用（仍走 FIRE.MKF 序列帧）
+    PalBattleMagic.dbAnimationId = function (action) {
+        if (!PalBattleMagic.useDbAnimation) return 0;
+        const item = action && action.item && action.item();
+        if (!item) return 0;
+        if (item.animationId > 0) return item.animationId;
+        const m = /<palAnim:\s*(\d+)\s*>/i.exec(item.note || "");
+        return m ? Number(m[1]) : 0;
+    };
+
+    PalBattleMagic.isDbAnimationPlaying = function () {
+        const scene = SceneManager._scene;
+        const ss = scene && scene._spriteset;
+        return !!(ss && ss.isAnimationPlaying && ss.isAnimationPlaying());
+    };
+
+    //=============================================================================
     // 特效播放器（挂在 battleField 上的精灵，逐帧切换 bitmap）
     //=============================================================================
 
@@ -101,12 +204,18 @@
     Sprite_PalEffect.prototype = Object.create(Sprite.prototype);
     Sprite_PalEffect.prototype.constructor = Sprite_PalEffect;
 
-    Sprite_PalEffect.prototype.initialize = function (frames, entry, targetSprite, opts) {
+    // spot  : {sprite} 跟随受法者脚底 | {x,y} 固定屏幕落点
+    // affect: 受"吹飞/波纹"影响的精灵列表（原版是全场效果，fight.c 2683-2694）
+    // owner : 只有第一份特效驱动 affect，避免多份固定特效把抖动叠加 N 遍
+    Sprite_PalEffect.prototype.initialize = function (frames, entry, spot, affect, opts, owner) {
         Sprite.prototype.initialize.call(this);
         this._frames = frames;
         this._entry = entry;
-        this._target = targetSprite;
+        this._spot = spot || {};
+        this._target = spot && spot.sprite ? spot.sprite : null; // 兼容旧引用
+        this._affect = affect || [];
         this._opts = opts;
+        this._owner = !!owner;
         this._n = frames.length;
         this._fire = Math.max(0, Math.min(entry[8], this._n - 1));
         this._times = normTimes(entry[5]);
@@ -121,11 +230,22 @@
         this._done = false;
         this.anchor.x = 0.5;
         this.anchor.y = 1; // 底部中心（battle.c 244）
-        this.x = targetSprite.x + entry[2] * kPal(); // + wXOffset
-        this.y = targetSprite.y + entry[3] * kPal(); // + wYOffset
+        this._syncPos();
         this.scale.x = kFx();
         this.scale.y = kFx();
         this.bitmap = frames[0];
+    };
+
+    // 每帧重算落点：跟随受法者时，吹飞位移也会带动画一起走（与原版每帧重算一致）
+    Sprite_PalEffect.prototype._syncPos = function () {
+        const s = this._spot.sprite;
+        if (s) {
+            this.x = s.x + this._entry[2] * kPal(); // 目标脚底 + wXOffset
+            this.y = s.y + this._entry[3] * kPal(); // + wYOffset
+        } else {
+            this.x = this._spot.x || 0;
+            this.y = this._spot.y || 0;
+        }
     };
 
     Sprite_PalEffect.prototype.update = function () {
@@ -151,22 +271,29 @@
             }
         }
         this.bitmap = this._frames[this._fi];
-        const ts = this._target;
-        if (!ts) return;
-        // 风系吹飞：受法者随机抖动漂移（fight.c 2681-2694，pos += RandomLong(0,iBlow)）
-        if (this._opts.blow) {
-            ts._palBlowX = Math.min(24, (ts._palBlowX || 0) + Math.random() * 5 * kPal());
-            ts._palBlowY = (ts._palBlowY || 0) + Math.random() * 2.5 * kPal();
+        this._syncPos();
+        if (!this._owner) {
+            if (this._elapsed >= this._duration) this.finish();
+            return;
         }
-        // 波纹扭曲（wWave>0，如鬼降）：色调脉冲 + 轻微缩放摆动
-        if (this._opts.wave) {
-            const p = Math.min(1, this._elapsed / this._duration);
-            const v = Math.round(Math.sin(p * Math.PI) * 160);
-            ts.setColorTone([v, v, v, 0]);
-            if (this._baseScale === undefined) this._baseScale = ts.scale.x;
-            const s = 1 + Math.sin(this._elapsed / 60) * 0.04;
-            ts.scale.x = this._baseScale * s;
-            ts.scale.y = this._baseScale * s;
+        // 吹飞 / 波纹是全场效果，由 owner 统一施加（fight.c 2683-2694 遍历所有敌人）
+        for (const ts of this._affect) {
+            if (!ts) continue;
+            // 风系吹飞：受法者随机抖动漂移（fight.c 2681-2694，pos += RandomLong(0,iBlow)）
+            if (this._opts.blow) {
+                ts._palBlowX = Math.min(24, (ts._palBlowX || 0) + Math.random() * 5 * kPal());
+                ts._palBlowY = (ts._palBlowY || 0) + Math.random() * 2.5 * kPal();
+            }
+            // 波纹扭曲（wWave>0，如鬼降）：色调脉冲 + 轻微缩放摆动
+            if (this._opts.wave) {
+                const p = Math.min(1, this._elapsed / this._duration);
+                const v = Math.round(Math.sin(p * Math.PI) * 160);
+                ts.setColorTone([v, v, v, 0]);
+                if (ts._palFxBaseScale === undefined) ts._palFxBaseScale = ts.scale.x;
+                const s = 1 + Math.sin(this._elapsed / 60) * 0.04;
+                ts.scale.x = ts._palFxBaseScale * s;
+                ts.scale.y = ts._palFxBaseScale * s;
+            }
         }
         if (this._elapsed >= this._duration) this.finish();
     };
@@ -174,19 +301,21 @@
     Sprite_PalEffect.prototype.finish = function () {
         if (this._done) return;
         this._done = true;
-        const ts = this._target;
-        if (ts) {
-            ts._palBlowX = 0;
-            ts._palBlowY = 0;
-            if (this._opts.wave) {
-                // 红闪已接管色调时不动它（仙术红闪与特效同时结束，此情形罕见）
-                const b = ts._enemy || ts._actor;
-                if (!(b && b._palFlashUntil && performance.now() < b._palFlashUntil)) {
-                    ts.setColorTone([0, 0, 0, 0]);
-                }
-                if (this._baseScale !== undefined) {
-                    ts.scale.x = this._baseScale;
-                    ts.scale.y = this._baseScale;
+        if (this._owner) {
+            for (const ts of this._affect) {
+                if (!ts) continue;
+                ts._palBlowX = 0;
+                ts._palBlowY = 0;
+                if (this._opts.wave) {
+                    // 红闪已接管色调时不动它（仙术红闪与特效同时结束，此情形罕见）
+                    const b = ts._enemy || ts._actor;
+                    if (!(b && b._palFlashUntil && performance.now() < b._palFlashUntil)) {
+                        ts.setColorTone([0, 0, 0, 0]);
+                    }
+                    if (ts._palFxBaseScale !== undefined) {
+                        ts.scale.x = ts._palFxBaseScale;
+                        ts.scale.y = ts._palFxBaseScale;
+                    }
                 }
             }
         }
@@ -199,7 +328,11 @@
     //=============================================================================
 
     PalBattleMagic.playEffect = function (casterSprite) {
-        const action = BattleManager._action;
+        // ⚠ 必须取【这个施法者自己的】动作，不能用全局 BattleManager._action：
+        // CTB 下可能有多名角色同时行动，_action 已被后一位覆盖 ——
+        // 症状就是"后一位施法者放的是前一位的法术特效"。
+        // _palCastAction 由 palBattleAnim 在 performAction 里按精灵绑定。
+        const action = (casterSprite && casterSprite._palCastAction) || BattleManager._action;
         if (!action || !action.isSkill || !action.isSkill()) return;
         const meta = PalBattleCore.parseMeta(action.item());
         const entry = meta && MAGIC_TABLE[meta.mid];
@@ -211,7 +344,19 @@
         if (!field) return;
         const subject = casterSprite._actor || casterSprite._enemy;
         const targets = ((subject && subject._palTargets) || []).filter(t => t);
-        if (!targets.length) return;
+
+        // ① 数据库动画通道：技能配了 animationId / <palAnim:ID> 就交给引擎播
+        const dbId = PalBattleMagic.dbAnimationId(action);
+        if (dbId > 0) {
+            if ($dataAnimations && $dataAnimations[dbId]) {
+                $gameTemp.requestAnimation(targets.length ? targets : [subject], dbId);
+            }
+            return;
+        }
+
+        // ② FIRE.MKF 序列帧：按 wType 决定摆几份、摆在哪
+        const spots = PalBattleMagic.effectSpots(subject, entry, targets);
+        if (!spots.length) return;
         const frames = [];
         for (let i = 1; i <= n; i++) frames.push(ImageManager.loadAnimation(fx + "-" + i));
         const offensive = !!(action.isDamage && action.isDamage());
@@ -219,12 +364,16 @@
             blow: offensive && meta.elem === 1, // 风系攻击仙术
             wave: (entry[7] || 0) > 0          // 波纹（鬼降等）
         };
-        for (const target of targets) {
-            const ts = PalBattleAnim.spriteOf(target);
-            if (!ts) continue;
-            field.addChild(new Sprite_PalEffect(frames, entry, ts, opts));
-            activeCount++;
+        // 吹飞/波纹影响到的精灵（原版是全场遍历，不只看落点）
+        const affect = [];
+        for (const t of targets) {
+            const s = PalBattleAnim.spriteOf(t);
+            if (s) affect.push(s);
         }
+        spots.forEach((spot, i) => {
+            field.addChild(new Sprite_PalEffect(frames, entry, spot, affect, opts, i === 0));
+            activeCount++;
+        });
     };
 
     //=============================================================================
@@ -236,9 +385,11 @@
         if (!action || !action.isSkill || !action.isSkill()) return false;
         const meta = PalBattleCore.parseMeta(action.item());
         if (!meta || meta.mid === undefined) return false;
-        if (PalBattleMagic.effectDuration(meta) <= 0) return false; // 无特效仙术不拦
+        const useDb = PalBattleMagic.dbAnimationId(action) > 0;
+        if (!useDb && PalBattleMagic.effectDuration(meta) <= 0) return false; // 无特效仙术不拦
         const elapsed = performance.now() - (bm._palActionStartAt || performance.now());
         if (elapsed < PalBattleMagic.castOffset(bm._subject, meta)) return true;
+        if (useDb) return PalBattleMagic.isDbAnimationPlaying();
         return PalBattleMagic.isEffectPlaying();
     };
 

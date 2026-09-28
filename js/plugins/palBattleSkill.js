@@ -1,6 +1,6 @@
 /*:
  * @target MZ
- * @plugindesc [v1.4] 仙剑98柔情版战斗仙术选择界面（三列宫格列表 + 左上真气栏 + 顶部仙术说明；参数全暴露 + 说明层纯透明 + 单体技确认后收起面板进选敌/选人 + 鼠标悬浮/点击选中）
+ * @plugindesc [v1.5] 仙剑98柔情版战斗仙术选择界面（三列宫格列表 + 左上真气栏 + 顶部仙术说明；参数全暴露 + 说明层纯透明 + 单体技确认后收起面板进选敌/选人 + 鼠标悬浮/点击选中 + 方向键边界修正）
  * @author AI Assistant
  *
  * @help
@@ -37,6 +37,11 @@
  *       自己算，不再读 _clientArea 的尺寸；
  *       同时 _updateClientArea 补回 x/y 减 origin（原版行为），仙术多于 15 个
  *       滚动时内容区才会跟着滚（v1.3 漏了这一句）。
+ *
+ * ===== v1.5 修复：只有一个仙术时按上键会"一个都选不中" =====
+ * cursorUp 的环绕算法 maxItems - maxCols + col 在只有 1 个仙术时算出 -2，
+ * select(-2) 让列表进入"无选中"状态。现在四个方向键统一 clamp 到
+ * [0, maxItems-1]，并且 index() === -1 时先落到 0。
  *
  * ⚠ 这里只收【仙术窗】，绝不碰 _actorCommandWindow（四个指令按钮所在的指令盘）：
  *   攻击/防御等指令同样走 onSelectAction，而 MZ 的 onEnemyCancel 对 "attack"
@@ -411,15 +416,28 @@
     };
 
     // 三列网格方向键（带环绕；末行不齐时尽量落在同列）
+    //
+    // ⚠ 两个边界必须处理（v1.4 修）：
+    //   ① maxItems === 1（只有一个仙术）：环绕算出来的 next 会越界成负数
+    //      → select(-2) → 列表里一个都没选中（金色呼吸消失）。
+    //      现在 next 统一 clamp 到 [0, maxItems-1]，只有一个仙术时怎么按都停在它身上。
+    //   ② index() === -1（还没选中任何项）：先落到 0，别从 -1 去算列号。
+    const palClampIndex = function (next, maxItems) {
+        if (next === undefined) return undefined;
+        return Math.max(0, Math.min(next, maxItems - 1));
+    };
+
     Window_BattleSkill.prototype.cursorRight = function (wrap) {
         const maxItems = this.maxItems();
         if (maxItems <= 0) return;
+        if (this.index() < 0) { this.smoothSelect(0); SoundManager.playCursor(); return; }
         const maxCols = this.maxCols();
         const i = this.index();
         const col = i % maxCols;
         let next;
         if (col < maxCols - 1 && i + 1 < maxItems) next = i + 1;
         else if (wrap) next = i - col; // 环绕到本行第一列
+        next = palClampIndex(next, maxItems);
         if (next !== undefined && next !== i) {
             this.smoothSelect(next);
             SoundManager.playCursor();
@@ -429,12 +447,14 @@
     Window_BattleSkill.prototype.cursorLeft = function (wrap) {
         const maxItems = this.maxItems();
         if (maxItems <= 0) return;
+        if (this.index() < 0) { this.smoothSelect(0); SoundManager.playCursor(); return; }
         const maxCols = this.maxCols();
         const i = this.index();
         const col = i % maxCols;
         let next;
         if (col > 0) next = i - 1;
         else if (wrap) next = Math.min(i - col + maxCols - 1, maxItems - 1); // 环绕到本行末列
+        next = palClampIndex(next, maxItems);
         if (next !== undefined && next !== i) {
             this.smoothSelect(next);
             SoundManager.playCursor();
@@ -444,11 +464,13 @@
     Window_BattleSkill.prototype.cursorDown = function (wrap) {
         const maxItems = this.maxItems();
         if (maxItems <= 0) return;
+        if (this.index() < 0) { this.smoothSelect(0); SoundManager.playCursor(); return; }
         const maxCols = this.maxCols();
         const i = this.index();
         let next;
         if (i + maxCols < maxItems) next = i + maxCols;
         else if (wrap) next = i % maxCols; // 环绕到同列第一行
+        next = palClampIndex(next, maxItems);
         if (next !== undefined && next !== i) {
             this.smoothSelect(next);
             SoundManager.playCursor();
@@ -458,15 +480,19 @@
     Window_BattleSkill.prototype.cursorUp = function (wrap) {
         const maxItems = this.maxItems();
         if (maxItems <= 0) return;
+        if (this.index() < 0) { this.smoothSelect(0); SoundManager.playCursor(); return; }
         const maxCols = this.maxCols();
         const i = this.index();
         const col = i % maxCols;
         let next;
-        if (i - maxCols >= 0) next = i - maxCols;
-        else if (wrap) {
-            next = maxItems - maxCols + col; // 同列末行
-            if (next >= maxItems) next = maxItems - 1;
+        if (i - maxCols >= 0) {
+            next = i - maxCols;
+        } else if (wrap) {
+            const lastRow = Math.floor((maxItems - 1) / maxCols);
+            next = lastRow * maxCols + col;        // 同列末行
+            if (next >= maxItems) next -= maxCols; // 末行不齐时退一行
         }
+        next = palClampIndex(next, maxItems);
         if (next !== undefined && next !== i) {
             this.smoothSelect(next);
             SoundManager.playCursor();
