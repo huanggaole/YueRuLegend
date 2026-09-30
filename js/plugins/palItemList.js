@@ -49,6 +49,9 @@
         this.padding = 0; // MUST be 0 to prevent the background image from being truncated by the contents mask
     };
 
+    // 原版布局（itemmenu.c 196-253）：图标框固定在 PAL(0,140)、道具图 PAL(8,147)、
+    // 说明文字固定在 PAL(75,150) 起每行 +16 —— 全部固定坐标，与行数无关，
+    // 不做任何垂直居中（2 行和 3 行的第一行从同一个 y 开始写）。
     Window_PaladinItemHelp.prototype.refresh = function () {
         this.contents.clear();
 
@@ -60,63 +63,48 @@
             return;
         }
 
-        // 1. Draw Icon Background (always visible, even if no item selected)
-        const scale = 3; // Icon background scale
-        const bgW = this._iconBg.width * scale;
-        const bgH = this._iconBg.height * scale;
-        const padX = 18;
+        const k = Graphics.boxWidth / 320;
+        const kPal = v => Math.round(v * k);
+        // 与 createHelpWindow 的窗口 y（Graphics.boxHeight - 240）一致，把屏幕
+        // PAL 坐标换算成窗口内坐标
+        const wy = Graphics.boxHeight - 240;
 
-        // 文案行（最多 3 行，颜色 #F7EB99）——先算好高度再统一排版，
-        // 原来图标框底部对齐再 +12、文字居中再 +30，两处硬偏移叠加后
-        // 在窗口高度不足时必然溢出底部（主字号 48 → lineHeight 56，
-        // 3 行本身就要 216px，180 高的窗口放不下，第 3 行被切掉）。
-        const desc = this._item ? (this._item.description || "") : "";
-        const lines = desc.replace(/\\n/g, '\n').split(/[\r\n]+/).slice(0, 3);
-        const lineSpacing = 16;
-        const textHeight = lines.length
-            ? this.lineHeight() * lines.length + lineSpacing * (lines.length - 1)
-            : 0;
-
-        // 图标框与文字整体在窗口内垂直居中，谁高按谁算，两边都不再额外下移
-        const blockHeight = Math.max(bgH, textHeight);
-        const blockTop = Math.max(0, (this.contents.height - blockHeight) / 2);
-        const bgY = blockTop + (blockHeight - bgH) / 2;
-        this.contents.blt(this._iconBg, 0, 0, this._iconBg.width, this._iconBg.height, padX, bgY, bgW, bgH);
+        // 图标框 PAL(0,140)，64×64（原版就是贴着屏幕左缘、底部略被裁掉）
+        const bgSize = kPal(64);
+        this.contents.blt(this._iconBg, 0, 0, this._iconBg.width, this._iconBg.height,
+            kPal(0), kPal(140) - wy, bgSize, bgSize);
 
         if (!this._item) return;
 
-        // Draw Icon
-        const iconIndex = this._item.iconIndex;
-        // 自定义缩放
+        // 道具图 PAL(8,147)，48×48
         const iconSet = ImageManager.loadSystem("IconSet");
         const pw = ImageManager.iconWidth;
         const ph = ImageManager.iconHeight;
-        const sx = (iconIndex % 16) * pw;
-        const sy = Math.floor(iconIndex / 16) * ph;
-        const iconScale = 3; // 道具icon放大倍率
-        // Draw icon centered on the background
-        const iconW = pw * iconScale;
-        const iconH = ph * iconScale;
-        const iconX = padX + (bgW - iconW) / 2;
-        const iconY = bgY + (bgH - iconH) / 2;
-        this.contents.blt(iconSet, sx, sy, pw, ph, iconX, iconY, iconW, iconH);
+        const sx = (this._item.iconIndex % 16) * pw;
+        const sy = Math.floor(this._item.iconIndex / 16) * ph;
+        if (iconSet.isReady()) {
+            const isz = kPal(48);
+            this.contents.blt(iconSet, sx, sy, pw, ph, kPal(8), kPal(147) - wy, isz, isz);
+        } else if (!this._listeningImages.has(iconSet)) {
+            iconSet.addLoadListener(this._refreshListener);
+            this._listeningImages.add(iconSet);
+        }
 
-        // Draw Description
-        this.contents.outlineWidth = 0; // Remove outline, use shadow instead
-
-        const textX = padX + bgW + 16;
-        let textY = blockTop + (blockHeight - textHeight) / 2;
-
-        for (let i = 0; i < lines.length; i++) {
-            // Draw Shadow
-            this.contents.textColor = '#000000';
-            this.contents.drawText(lines[i], textX + 2, textY + 2, this.contents.width - textX, this.lineHeight(), 'left');
-
-            // Draw Text
-            this.contents.textColor = '#F7EB99';
-            this.contents.drawText(lines[i], textX, textY, this.contents.width - textX, this.lineHeight(), 'left');
-
-            textY += this.lineHeight() + lineSpacing;
+        // 说明文字 PAL(75,150) 起，行距 16，最多 3 行；起始 y 固定，不随行数变化
+        const desc = this._item.description || "";
+        const lines = desc.replace(/\\n/g, "\n").split(/[\r\n*]+/).slice(0, 3);
+        this.contents.outlineWidth = 0;
+        this.contents.fontSize = kPal(12); // 与列表/战斗说明同字号（原版说明与列表同字号）
+        const tx = kPal(75);
+        const tw = this.contents.width - tx;
+        const lh = kPal(12);
+        let ty = kPal(150) - wy;
+        for (const line of lines) {
+            this.contents.textColor = "#000000";
+            this.contents.drawText(line, tx + 2, ty + 2, tw, lh, "left");
+            this.contents.textColor = "#F7EB99";
+            this.contents.drawText(line, tx, ty, tw, lh, "left");
+            ty += kPal(16);
         }
     };
 

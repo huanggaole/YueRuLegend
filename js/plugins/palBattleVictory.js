@@ -178,12 +178,15 @@
         const v = this._palVictory;
         if (!v) return;
         // 原版布局（640×480 游戏坐标，逐帧测量自原版录像 28s，见文件头注释）
+        // 面板高/纵坐标与宽高统一按 kx（宽度比例）缩放：原版是固定 4:3 画面，
+        // 字高、数字、面板宽都随宽度等比放大；若高度按 ky 缩放，窗口宽扁时
+        // （kx>ky）字还在按 kx 变大、框却按 ky 变矮，文字就会贴满框、留白消失
+        // （用户对照原版截图：字/框内高 ≈ 0.61，上下左右都应留出 padding）。
         const kx = Graphics.boxWidth / 640;
-        const ky = Graphics.boxHeight / 480;
-        const H = Math.round(75 * ky); // 原版文字墨高/底板高 ≈ 0.61（36px 字、62 为米色区测量值，未含投影边）
-        const x1 = Math.round(176 * kx), y1 = Math.round(154 * ky), W1 = Math.round(262 * kx);
-        const x2 = Math.round(139 * kx), y2 = Math.round(262 * ky), W2 = Math.round(327 * kx);
-        v.layout = { kx, ky, H };
+        const H = Math.round(75 * kx); // 原版文字墨高/底板高 ≈ 0.61（36px 字、62 为米色区测量值，未含投影边）
+        const x1 = Math.round(176 * kx), y1 = Math.round(154 * kx), W1 = Math.round(262 * kx);
+        const x2 = Math.round(139 * kx), y2 = Math.round(262 * kx), W2 = Math.round(327 * kx);
+        v.layout = { kx, H };
         v.panels = [
             { label: "获得经验值", value: v.exp, suffix: "", x: x1, y: y1, w: W1 },
             { label: "打败敌人得", value: v.gold, suffix: "文钱", x: x2, y: y2, w: W2 }
@@ -201,12 +204,12 @@
     Scene_Battle.prototype.redrawPalVictoryPanels = function () {
         const v = this._palVictory;
         if (!v || !v.panels) return;
-        const { kx, ky, H } = v.layout;
+        const { kx, H } = v.layout;
         // 数字：6×8 素材放大到高约 19（原版比例 2.4×），字间空隙 ≈ 2.6
         const ds = 2.4 * kx;
         const spacing = 2.6 * kx;
         // 文字垂直居中偏下 2px（原版阴影在下方，视觉重心略低）
-        const cy = H / 2 + 2 * ky;
+        const cy = H / 2 + 2 * kx;
         // 等素材加载完成后重绘（每次 update 尝试，直到成功）
         let allReady = true;
         for (const p of v.panels) {
@@ -420,6 +423,43 @@
     //=============================================================================
     // BattleManager：胜利流程接管
     //=============================================================================
+
+    //=============================================================================
+    // 收尾节拍：胜负判定等画面演完再进行
+    // --------------------------------------------------------------------------
+    // RMMZ 原生 isBusy 只统计 MZ 动画与"位移中"，统计不到本工程的
+    // ①伤害飘字（_damages 存活 ~0.4s）②动作序列尾部等待（_palSeq）
+    // ③敌人死亡渐隐（_palDeathAt，~0.6s）——于是最后一击的伤害动画没播完、
+    // 飘字还在往上飘，胜利面板就弹出来了。这里在"即将分出胜负"的当口先核对一遍：
+    // 画面上还有没演完的，就下一帧再判。
+    //=============================================================================
+
+    BattleManager.isPalAftermathBusy = function () {
+        const spriteset = this._spriteset;
+        if (!spriteset) return false;
+        for (const sp of spriteset.battlerSprites()) {
+            if (sp._damages && sp._damages.length > 0) return true;   // 伤害飘字未飘完
+            if (window.PalBattleAnim && PalBattleAnim.isBusy(sp)) return true; // 动作序列未播完
+            const b = sp._battler;
+            if (b && b.isDead && b.isDead() &&
+                sp._palDeathAt && sp.opacity > 0) return true;        // 死亡渐隐未结束
+        }
+        return false;
+    };
+
+    const _checkBattleEnd = BattleManager.checkBattleEnd;
+    BattleManager.checkBattleEnd = function () {
+        if (this._phase && !$gameParty.isEscaped() &&
+            ($gameParty.isAllDead() || $gameTroop.isAllDead()) &&
+            this.isPalAftermathBusy()) {
+            // 演出未完：返回 true 把 BattleManager.updateEvent 顶成"有事件在处理"，
+            // 冻结回合推进 —— 否则 updateTurn 会继续把【还没出手的队友/敌人】的
+            // 已排队行动执行掉（围攻时全员在输入阶段就排好了普攻，队友刚击毙
+            // 最后一个敌人，剩下的人还会对着空目标挥刀，见 fight.c 的即时串行节奏）。
+            return true; // 演出播完后的下一帧再真正判胜负
+        }
+        return _checkBattleEnd.call(this);
+    };
 
     const _startBattle = BattleManager.startBattle;
     BattleManager.startBattle = function () {

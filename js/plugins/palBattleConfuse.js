@@ -5,7 +5,11 @@
  *
  * @help
  * 原版 kBattleActionAttackMate（battle.h:59 "attack teammate (confused only)"）。
- * 注意：这不是「围攻」——围攻 = kBattleActionCoopMagic，已由 palBattleCoop.js 实现。
+ * 注意：这不是「围攻」也不是「合体技」——
+ *   围攻   = fAutoAttack（uibattle.c 1386-1392 杂项菜单第 3 项，词条 word 56），
+ *            由 palBattleAuto.js 实现；
+ *   合体技 = kBattleActionCoopMagic（battle.h:55），由 palBattleCoop.js 实现；
+ *   本文件只做 kBattleActionAttackMate（battle.h:59）：混乱/疯魔时打自己人。
  *
  * 触发时机（fight.c 1308 / 1743，kFighterAct 即角色真正开始行动那一刻）：
  *   昏睡               → Pass（跳过行动）
@@ -40,7 +44,8 @@
 
     const PalBattleConfuse = (window.PalBattleConfuse = {});
 
-    const BATTLE_MS = 40;                    // 原版一帧（BATTLE_FPS = 25）
+    if (window.PAL98_SPEED == null) window.PAL98_SPEED = 1;
+    const battleMs = () => 40 / (window.PAL98_SPEED || 1); // 原版一帧（BATTLE_FPS = 25）
     const GUARD_STATE_ID = 2;
     const CONFUSE_STATES = [9, 11];          // 疯魔 / 疯魔5
     const SLEEP_STATES = [10, 19];           // 昏睡3 / 昏睡5
@@ -144,23 +149,23 @@
             dy = targetSprite.y + MATE_OFFSET_PAL[1] * k - sprite._homeY;
         }
         return [
-            { frame: AF.ATK1 }, { wait: BATTLE_MS },      // 0    原地抖：帧8
-            { frame: AF.IDLE }, { wait: BATTLE_MS },      // 40   帧0
-            { frame: AF.ATK1 }, { wait: BATTLE_MS },      // 80   帧8
-            { frame: AF.IDLE }, { wait: BATTLE_MS },      // 120  帧0
-            { wait: 2 * BATTLE_MS },                      // 160  delay 2
+            { frame: AF.ATK1 }, { wait: battleMs() },      // 0    原地抖：帧8
+            { frame: AF.IDLE }, { wait: battleMs() },      // 40   帧0
+            { frame: AF.ATK1 }, { wait: battleMs() },      // 80   帧8
+            { frame: AF.IDLE }, { wait: battleMs() },      // 120  帧0
+            { wait: 2 * battleMs() },                      // 160  delay 2
             // 240  瞬移到队友身边（原版直接改 pos，不是走过去）
-            { frame: AF.ATK1, moveAbs: [dx, dy], ms: BATTLE_MS },
-            { wait: 5 * BATTLE_MS },                      // 停 5 帧
+            { frame: AF.ATK1, moveAbs: [dx, dy], ms: battleMs() },
+            { wait: 5 * battleMs() },                      // 停 5 帧
             { frame: AF.ATK2 },                           // 440  挥砍 + 武器音 + 伤害
-            { wait: 4 * BATTLE_MS },                      // 480  泛红/击退表现期
-            { moveAbs: [0, 0], ms: 5 * BATTLE_MS }        // 640  归位
+            { wait: 4 * battleMs() },                      // 480  泛红/击退表现期
+            { moveAbs: [0, 0], ms: 5 * battleMs() }        // 640  归位
         ];
     };
 
     // 挥砍帧（帧9）落在第 11 帧 = 440ms。武器音与伤害数字都按 popupDelay 对齐到这一刻，
     // 所以这里只要改 popupDelay，palBattleSe 的武器音就自动同步。
-    PalBattleConfuse.HIT_MS = 11 * BATTLE_MS;
+    Object.defineProperty(PalBattleConfuse, "HIT_MS", { get: () => 11 * battleMs() });
 
     const _popupDelay = PalBattleAnim.popupDelay;
     PalBattleAnim.popupDelay = function () {
@@ -219,7 +224,7 @@
     const _spriteActorUpdate = Sprite_Actor.prototype.update;
     Sprite_Actor.prototype.update = function () {
         _spriteActorUpdate.call(this);
-        if (this._palMateBackAt && performance.now() - this._palMateBackAt > 4 * BATTLE_MS) {
+        if (this._palMateBackAt && performance.now() - this._palMateBackAt > 4 * battleMs()) {
             this._palMateBackAt = 0;
             if (!PalBattleAnim.isBusy(this)) this.startMove(0, 0, 10);
         }

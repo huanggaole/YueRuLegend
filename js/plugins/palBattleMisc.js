@@ -1,23 +1,28 @@
 /*:
  * @target MZ
- * @plugindesc [v1.0] 仙剑98柔情版战斗杂项菜单（下按钮：围攻/道具/防御/逃跑/状态）
+ * @plugindesc [v1.1] 仙剑98柔情版战斗杂项菜单（下按钮：围攻/道具/防御/逃跑/状态）
  * @author AI Assistant
  *
  * @help
  * 复刻仙剑98柔情版战斗主菜单的“杂项”子菜单（uibattle.c PAL_BattleUIDrawMiscMenu）：
- * 指令盘下按钮（旗图标）弹出五项菜单——围攻(合体技)/道具/防御/逃跑/状态。
+ * 指令盘下按钮（旗图标）弹出五项菜单——围攻/道具/防御/逃跑/状态。
  *
  * ===== 实现方式 =====
  * 菜单窗 Window_PalBattleMisc 直接继承地图 ESC 菜单的 Window_PaladinMenuBase，
  * 底板素材与九宫格拉伸完全一致（Data90~98，平铺式拉伸，呼吸选中字）。
- * 原版布局：框在左上角 PAL_XY(2,20)（320 坐标 → 本工程 ×3），
- * 五个选项纵向排列（uibattle.c：物品/防御/自动/逃跑/状态，本工程按用户
- * 指定的柔情版顺序：围攻/道具/防御/逃跑/状态）。
+ * 原版布局：框在左上角 PAL_XY(2,20)（320 坐标 → 本工程 ×3），五个选项纵向排列。
  *
- * 各选项行为（对照 sdlpal uibattle.c 1359-1426，PAL_CLASSIC 分支）：
- *  · 围攻：与右侧“合体”按钮相同（palBattleCoop.beginCoopMagic）；
- *          ⚠ 原版第 1 项其实是「自动」(kBattleMenuAuto → fAutoAttack)，
- *            按哈里叔叔指定换成「围攻」。
+ * ⚠ 原版 98 柔情版（非 PAL_CLASSIC，uibattle.c 378-385）的顺序是
+ *   【道具(5) / 防御(58) / 围攻(56) / 逃跑(59) / 状态(60)】——围攻在【第 3 项】。
+ *   词条已用 WORD_chs.txt 核对：56=围攻 57=道具 58=防御 59=逃跑 60=状态。
+ *   本工程把「围攻」放在第 1 项（PalBattleMisc.MENU_ORDER，可运行时改），
+ *   改回原版顺序只需：PalBattleMisc.setMenuOrder(["item","guard","autoatk","escape","status"])。
+ *
+ * 各选项行为（对照 sdlpal uibattle.c 1359-1426）：
+ *  · 围攻：原版 fAutoAttack（uibattle.c 1386-1392 第 3 项 kBattleMenuAuto），
+ *          由 palBattleAuto.js 实现——全员自动普攻，右上角金色「围攻」，
+ *          按 ESC 或再选一次取消；跨回合保持（fight.c 1446）。
+ *          ⚠ 围攻 ≠ 合体技：合体技是右侧按钮（kBattleActionCoopMagic，palBattleCoop.js）。
  *  · 道具：原版还有二级菜单 kBattleMenuMiscItemSubMenu —— 【使用】/【投掷】；
  *          这里照做，两个子项分别以 battle_use / battle_throw 模式打开道具窗。
  *  · 防御：kBattleActionDefend → PAL_BattleCommitAction；
@@ -53,16 +58,37 @@
     Window_PalBattleMisc.prototype = Object.create(Window_PaladinMenuBase.prototype);
     Window_PalBattleMisc.prototype.constructor = Window_PalBattleMisc;
 
+    // 菜单项顺序。原版 98 柔情版（uibattle.c 378-385）是
+    //   道具 / 防御 / 围攻 / 逃跑 / 状态
+    // 本工程把「围攻」提到第 1 项。运行时改：
+    //   PalBattleMisc.setMenuOrder(["item","guard","autoatk","escape","status"])
+    const MENU_ORDER = (PalBattleMisc.MENU_ORDER = [
+        "autoatk", "item", "guard", "escape", "status"
+    ]);
+
+    PalBattleMisc.setMenuOrder = function (order) {
+        if (!Array.isArray(order) || !order.length) return MENU_ORDER;
+        MENU_ORDER.length = 0;
+        for (const s of order) MENU_ORDER.push(s);
+        const scene = SceneManager._scene;
+        if (scene && scene._palMiscWindow) scene._palMiscWindow.refresh();
+        return MENU_ORDER;
+    };
+
+    const MENU_TEXT = {
+        autoatk: "围攻", item: "道具", guard: "防御", escape: "逃跑", status: "状态"
+    };
+
     Window_PalBattleMisc.prototype.makeCommandList = function () {
         const actor = BattleManager.actor();
         const movable = actor ? actor.canMove() : false;
-        // 围攻 = 合体技：装备挂载 + 全员体力≥1/5 且无眠/乱/封/定
-        const coopOk = !!(window.PalBattleCoop && PalBattleCoop.canUse(actor));
-        this.addCommand("围攻", "coop", coopOk);
-        this.addCommand("道具", "item", movable);
-        this.addCommand("防御", "guard", movable);
-        this.addCommand("逃跑", "escape", BattleManager.canEscape());
-        this.addCommand("状态", "status", true);
+        // 原版五项一律可选（uibattle.c 378-385：enabled 全 TRUE）；
+        // 本工程只按"能否行动"禁用道具/防御，逃跑另看事件的「可以逃跑」开关
+        const enabled = { autoatk: true, item: movable, guard: movable,
+                          escape: BattleManager.canEscape(), status: true };
+        for (const symbol of MENU_ORDER) {
+            this.addCommand(MENU_TEXT[symbol] || symbol, symbol, enabled[symbol]);
+        }
     };
 
     // 与地图菜单一致的行高（呼吸字选中效果由 Window_PaladinBase 提供）
@@ -188,7 +214,7 @@
         const k = Graphics.boxWidth / 320;
         const rect = new Rectangle(Math.round(2 * k), Math.round(20 * k), 216, 336);
         this._palMiscWindow = new Window_PalBattleMisc(rect);
-        this._palMiscWindow.setHandler("coop", this.onMiscCoop.bind(this));
+        this._palMiscWindow.setHandler("autoatk", this.onMiscAutoAtk.bind(this));
         this._palMiscWindow.setHandler("item", this.onMiscItem.bind(this));
         this._palMiscWindow.setHandler("guard", this.onMiscGuard.bind(this));
         this._palMiscWindow.setHandler("escape", this.onMiscEscape.bind(this));
@@ -255,9 +281,21 @@
     //=============================================================================
     const PAL_ITEM = {
         boxX: 2, boxY: 0, boxW: 316, boxH: 150,
-        textX: 15, textY: 12, cellW: 100, cellH: 18, glyphH: 12,
+        // ⚠ textY = 6 而不是原版的 12：
+        // 原版 PAL 的文字是"字形顶对齐坐标"的（12 + 18*行），但 MZ 的
+        // Bitmap.drawText 会把字形顶放到 y + lineHeight/2 + fontSize*0.35 处
+        //（rmmz_core.js 1668），也就是会往下掉约 31px。数字和光标是图片
+        //（blt，不受影响），所以整块只能靠 textY 统一上提 6 PAL（≈18px）来补偿，
+        // 否则第一行会离框顶太远 —— 表现为"选项的上留白明显多于下留白"。
+        textX: 15, textY: 6, cellW: 100, cellH: 18, glyphH: 12,
         cursorX: 40, cursorY: 22, cursorW: 9, cursorH: 6,      // SPRITENUM_CURSOR=69 → Data969
-        qtyDigits: 2, qtyDigitW: 6, qtyX: 96, qtyRight: 108, qtyY: 17,
+        // ⚠ qtyDy / cursorDy 是**相对文字行顶**的固定偏移（原版：文字 y=12、
+        // 数字 y=17、光标 y=22），必须写成常量。之前写成 `qtyY - textY` 是错的：
+        // textY 后来为了补偿 MZ drawText 的排版被整体从 12 调到 6，
+        // 一相减那个补偿量就被带进数字里，数字整体掉了 28px（实测名字 ink
+        // [17,53] 却画在 [51,75]）。
+        qtyDy: 2, cursorDy: 10,
+        qtyDigits: 2, qtyDigitW: 6, qtyX: 96, qtyRight: 108,
         iconBoxX: 0, iconBoxY: 140, iconBoxW: 64, iconBoxH: 64, // SPRITENUM_ITEMBOX=70 → Data970
         iconX: 8, iconY: 147, iconSize: 48,
         descX: 75, descY: 150, descStep: 16
@@ -291,35 +329,35 @@
     //-----------------------------------------------------------------------------
 
     const PAL_USABLE_ITEM = {
-        1: true, 2: true, 3: true, 4: true, 5: true, 7: true,
-        8: true, 9: true, 10: true, 11: true, 12: true, 13: true,
-        14: true, 15: true, 16: true, 17: true, 18: true, 19: true,
-        20: true, 21: true, 22: true, 23: true, 24: true, 25: true,
-        26: true, 27: true, 28: true, 29: true, 30: true, 31: true,
-        32: true, 33: true, 34: true, 35: true, 36: true, 37: true,
-        38: true, 39: true, 40: true, 41: true, 42: true, 43: true,
-        44: true, 45: true, 46: true, 47: true, 48: true, 49: true,
-        50: true, 51: true, 52: true, 53: true, 55: true, 56: true,
-        57: true, 58: true, 59: true, 62: true, 81: true, 82: true,
-        83: true, 84: true, 85: true, 86: true, 87: true, 88: true,
-        89: true, 90: true, 91: true, 92: true, 93: true, 94: true,
-        95: true, 97: true, 99: true, 101: true, 102: true, 106: true,
-        108: true, 109: true, 110: true, 111: true, 113: true, 114: true,
-        117: true, 118: true, 119: true, 120: true, 124: true, 125: true,
-        128: true, 129: true
-    };  // 92 项
+        1: true, 2: true, 3: true, 4: true, 5: true, 6: true,
+        7: true, 8: true, 9: true, 10: true, 11: true, 12: true,
+        13: true, 14: true, 15: true, 16: true, 17: true, 18: true,
+        19: true, 20: true, 21: true, 22: true, 23: true, 24: true,
+        25: true, 26: true, 27: true, 28: true, 29: true, 30: true,
+        31: true, 32: true, 33: true, 34: true, 35: true, 36: true,
+        37: true, 38: true, 39: true, 40: true, 41: true, 42: true,
+        43: true, 44: true, 45: true, 46: true, 47: true, 48: true,
+        49: true, 50: true, 51: true, 52: true, 53: true, 55: true,
+        56: true, 57: true, 58: true, 59: true, 62: true, 81: true,
+        82: true, 83: true, 84: true, 85: true, 86: true, 87: true,
+        88: true, 89: true, 90: true, 91: true, 92: true, 93: true,
+        94: true, 95: true, 97: true, 99: true, 101: true, 102: true,
+        106: true, 107: true, 108: true, 109: true, 110: true, 111: true,
+        113: true, 114: true, 117: true, 118: true, 119: true, 120: true,
+        124: true, 125: true, 128: true, 129: true
+    };  // 94 项（6 金疮药=原版「金创药」101、107 破天槌=原版「破天锤」279，名称异体补录）
     const PAL_USABLE_WEAPON = {};   // 武器原版都不可「使用」，只能装备/投掷
     const PAL_THROWABLE_ITEM = {
         3: true, 24: true, 40: true, 42: true, 43: true, 49: true,
         53: true, 61: true, 62: true, 63: true, 64: true, 65: true,
         66: true, 67: true, 68: true, 69: true, 70: true, 71: true,
         72: true, 73: true, 74: true, 75: true, 76: true, 77: true,
-        78: true, 79: true, 81: true, 82: true, 83: true, 84: true,
-        85: true, 86: true, 87: true, 88: true, 89: true, 90: true,
-        91: true, 92: true, 93: true, 94: true, 95: true, 96: true,
-        97: true, 98: true, 99: true, 100: true, 101: true, 102: true,
-        103: true, 104: true
-    };  // 50 项
+        78: true, 79: true, 80: true, 81: true, 82: true, 83: true,
+        84: true, 85: true, 86: true, 87: true, 88: true, 89: true,
+        90: true, 91: true, 92: true, 93: true, 94: true, 95: true,
+        96: true, 97: true, 98: true, 99: true, 100: true, 101: true,
+        102: true, 103: true, 104: true
+    };  // 51 项（80 爆裂蛊=原版对象 146，异体名补录）
     const PAL_THROWABLE_WEAPON = {
         1: true, 2: true, 3: true, 4: true, 5: true, 6: true,
         7: true, 8: true, 9: true, 10: true, 11: true, 12: true,
@@ -382,6 +420,9 @@
     // 顺带 maxPageRows() = floor(414/54) = 7，正好是原版的 iLinesPerPage。
     Object.defineProperty(Window_PalBattleItemList.prototype, "innerHeight", {
         get: function () {
+            // 严格 7 行：PAL y = textY + 7*18。再多就会把第 8 行的头露在底框里，
+            //（MZ 的 pickTopIndex/maxPageRows 也靠这个算出 7 行翻页）。
+            // 第 7 行的文字底 ≈ rect.y + 30 + 字形高，仍在裁剪区内，不会被切。
             return Math.round((PAL_ITEM.textY + 7 * PAL_ITEM.cellH) * (Graphics.boxWidth / 320));
         },
         configurable: true
@@ -449,13 +490,19 @@
             // ⚠ 窗口原点在 PAL(2,0)，所以 contents 坐标要减掉 boxX
             const left = kPal(PAL_ITEM.qtyX - PAL_ITEM.boxX) +
                 (index % this.maxCols()) * kPal(PAL_ITEM.cellW);
-            this.blitQuantityDigits(quantity, left, rect.y + kPal(PAL_ITEM.qtyY - PAL_ITEM.textY));
+            this.blitQuantityDigits(quantity, left, rect.y + kPal(PAL_ITEM.qtyDy));
         }
 
         // 原版光标 SPRITENUM_CURSOR 画在 PAL_XY(40 + 100*col, 22 + 18*row)
+        //（itemmenu.c 54/191：iCursorXOffset = dwWordLength*5/2 = 25，固定 +25 PAL，
+        //  即"指向第二个字的末尾"——原版字形宽 15 PAL）。
+        // 本工程字形宽 12 PAL（fontSize 36），2 字名只有 24 PAL 宽，固定 +25 会指到
+        // 名字外 —— 短名字时按名字实际宽度贴末尾，3 字及以上保持原版固定 25。
         if (selected) {
-            const cx = rect.x + kPal(PAL_ITEM.cursorX - PAL_ITEM.textX);
-            const cy = rect.y + kPal(PAL_ITEM.cursorY - PAL_ITEM.textY);
+            const namePal = item.name.length * PAL_ITEM.glyphH;
+            const curOff = Math.min(PAL_ITEM.cursorX - PAL_ITEM.textX, namePal);
+            const cx = rect.x + kPal(curOff);
+            const cy = rect.y + kPal(PAL_ITEM.cursorDy);
             this.blitCursor(cx, cy);
         }
     };
@@ -736,34 +783,41 @@
     };
 
     //-----------------------------------------------------------------------------
-    // 地图菜单里的道具界面：与战斗用完全同一套几何与说明层
+    // 地图菜单里的道具界面：与战斗共用 Window_PalBattleItemList + Window_PaladinItemHelp
     // ----------------------------------------------------------------------------
-    // palItemList.js 的 Scene_PaladinItem 原来自己拍过一组尺寸
-    //（列表框 boxWidth-10 × boxHeight-180、说明窗贴底 240 高、图标框垂直居中），
-    // 结果同一个原版界面在地图和战斗里长得不一样：选项区的上下留白不同、
-    // 图标框和说明文字的位置也不同。这里统一成上面那套 PAL 坐标。
+    //   列表框  Window_PalBattleItemList  (5, 0, boxW-10, kPal(150))   七行三列
+    //   说明窗  Window_PaladinItemHelp    (0, boxH-240, 952, 240)      图标框 + 三行文案
+    // 历史实现本身有一处固有缺陷：两个窗口在 y 352..412 上重叠 60px，
+    // 而历史上是【列表框】盖住说明窗，于是图标框和第一行文案的顶部被底框切平
+    //（就是"图标和介绍文字有些靠上"的观感）。原版的规矩恰好相反 ——
+    // SPRITENUM_ITEMBOX 是在底板【之后】blit 的，图标框压着底板底边、
+    // 文案从底板底边开始。所以按原版来：
+    //   ① 两个窗口都不写 stencil：WindowLayer.render 是从 index 大往小渲染、
+    //      每渲染完一个窗口就把自己整个矩形写进 stencil，index 大的先写，
+    //      index 小的就只在 stencil==0 处画 —— 重叠区永远归 index 更大的窗口。
+    //      两边都清掉 drawShape 之后，"说明窗（index 0，后渲染）"才盖得住列表框。
+    //   ② 列表框高度恢复原版 150 PAL（itemmenu.c 117：
+    //      PAL_CreateBoxWithShadow(PAL_XY(2,0), 6, 17, 1) = 上20 + 6×18 + 下22）：
+    //      之前用 boxH-180 = 420，比原版矮 30px，第 7 行文字压进底边框、
+    //      上留白大于下留白（用户反馈"最后一行没有留出足够的下边缘"）。
     //-----------------------------------------------------------------------------
     if (window.Scene_PaladinItem) {
-        Scene_PaladinItem.prototype.createHelpWindow = function () {
-            // 幂等：Scene_MenuBase.createAllWindows 与 Scene_PaladinItem.create
-            // 各会调一次，别建出两个来
-            if (this._helpWindow instanceof Window_PalBattleItemDesc) return;
-            const rect = new Rectangle(0, 0, Graphics.boxWidth, Graphics.boxHeight);
-            this._helpWindow = new Window_PalBattleItemDesc(rect);
-        };
+        Window_PaladinItemList.prototype.drawShape = function () { };
+        Window_PaladinItemHelp.prototype.drawShape = function () { };
 
+        // ② 列表框用原版高度 150 PAL；内部选项的**排版**与战斗保持一致：
+        //    外框仍是历史 (5, 0, boxW-10)，
+        //    但列表窗换成 Window_PalBattleItemList —— 字号 kPal(12)、行距 kPal(18)、
+        //    3 列 × 7 行、名字限宽 81 PAL、数量右缘 PAL 108、光标 PAL(40, 22)。
         Scene_PaladinItem.prototype.createItemWindow = function () {
             const rect = new Rectangle(
-                kPal(PAL_ITEM.boxX), kPal(PAL_ITEM.boxY),
-                kPal(PAL_ITEM.boxW), kPal(PAL_ITEM.boxH)
+                5, 0, Graphics.boxWidth - 10, kPal(PAL_ITEM.boxH)
             );
             this._itemWindow = new Window_PalBattleItemList(rect);
             this._itemWindow.setHelpWindow(this._helpWindow);
             this._itemWindow.setMode(this._categoryMode === "equip" ? "menu_equip" : "menu_use");
             this._itemWindow.setHandler("ok", this.onItemOk.bind(this));
             this._itemWindow.setHandler("cancel", this.onCancel.bind(this));
-            // 先挂说明层、再挂列表框 —— 让说明层盖住列表框的底框（同战斗）
-            if (this._helpWindow) this.addWindow(this._helpWindow);
             this.addWindow(this._itemWindow);
             this._itemWindow.activate();
             this._itemWindow.selectLast();
@@ -884,10 +938,12 @@
         this._actorCommandWindow.activate();
     };
 
-    // 围攻 = 右侧“合体”按钮
-    Scene_Battle.prototype.onMiscCoop = function () {
+    // 围攻 = 原版 fAutoAttack（uibattle.c 1386-1392 kBattleMenuAuto → palBattleAuto）。
+    // 原版只是把 fAutoAttack 置 TRUE 并退回主指令盘，下一帧由
+    // 「fAutoAttack 分支」给当前伙伴提交普攻（uibattle.c 977-989）。
+    Scene_Battle.prototype.onMiscAutoAtk = function () {
         this.closePalMisc();
-        this.beginCoopMagic();
+        if (window.PalBattleAuto) PalBattleAuto.enable();
     };
 
     // 道具 = 原版 kBattleMenuMiscItemSubMenu：先弹【使用】/【投掷】二级菜单

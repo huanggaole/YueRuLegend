@@ -48,8 +48,9 @@
     const VOLUME = Number(params.volume || 90);
     const MUTE_DEFAULT_SE = String(params.muteDefaultSe) === "true";
 
-    // 原版战斗帧 40ms（battle.h BATTLE_FPS = 25）
-    const BATTLE_MS = 40;
+    // 原版战斗帧 40ms（battle.h BATTLE_FPS = 25），随 window.PAL98_SPEED 缩放
+    if (window.PAL98_SPEED == null) window.PAL98_SPEED = 1;
+    const battleMs = () => 40 / (window.PAL98_SPEED || 1);
 
     const Se = {};
     window.PalBattleSe = Se;
@@ -178,8 +179,8 @@
         // 投掷道具：fight.c 4351（kBattleActionThrowItem），前移 4 帧 + delay 2 帧，
         //           摆吟唱帧 5 时播的是 rgwMagicSound —— 与「使用」不是同一个音
         if (action.isItem && action.isItem()) {
-            if (action._palThrow) Se.playAt(Se.actor(this, "magicSound"), 6 * BATTLE_MS);
-            else Se.playAt(28, 4 * BATTLE_MS);
+            if (action._palThrow) Se.playAt(Se.actor(this, "magicSound"), 6 * battleMs());
+            else Se.playAt(28, 4 * battleMs());
             return;
         }
 
@@ -191,8 +192,13 @@
             ? PalBattleCore.parseMeta(item) : null;
         if (pal) {
             if (action._palCoop) return; // 合体技起手音由 palBattleCoop 负责（29）
-            Se.playAt(Se.actor(this, "magicSound"), 6 * BATTLE_MS);
-            Se.playAt(Se.skill(item), Se.hitDelay());
+            Se.playAt(Se.actor(this, "magicSound"), 6 * battleMs());
+            // 召唤仙术（wType 9）的 wSound 是【提亮之前】播（fight.c 3112-3115），
+            // 由 palBattleMagic.startSummon 负责 —— 这里不能再按"特效第 0 帧"排一次，
+            // 否则要等到落地特效结束才响（风神会晚 2 秒以上）。
+            const isSummon = !!(window.PalBattleMagic &&
+                PalBattleMagic.isSummon && PalBattleMagic.isSummon(item));
+            if (!isSummon) Se.playAt(Se.skill(item), Se.hitDelay());
         }
     };
 
@@ -214,7 +220,7 @@
             window.PalBattleCore && PalBattleCore.parseMeta(action.item());
         if (isPalMagic) {
             // fight.c 4695：前移 2 帧后播 e.wMagicSound
-            Se.playAt(Se.enemy(this, "mag"), 2 * BATTLE_MS);
+            Se.playAt(Se.enemy(this, "mag"), 2 * battleMs());
             // fight.c 2929：特效第 0 帧播 magic.wSound
             Se.playAt(Se.skill(action.item()), Se.hitDelay());
         } else {
@@ -230,7 +236,7 @@
             // fight.c 5003：普攻起手动作音 e.wActionSound。
             //   位置在「wMagicFrames 段动画 + 补步」之后、冲向目标之前，
             //   也就是命中前一帧（98 版要求 != 0 才播；Se.play 对 <=0 自动跳过）。
-            Se.playAt(Se.enemy(this, "act"), Math.max(0, Se.hitDelay() - BATTLE_MS));
+            Se.playAt(Se.enemy(this, "act"), Math.max(0, Se.hitDelay() - battleMs()));
 
             // fight.c 5084：命中瞬间 e.wCallSound（被掩护时是 coverSound，
             // 那条由 palBattleAnim.runCover 处理）

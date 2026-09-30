@@ -1,10 +1,14 @@
 /*:
  * @target MZ
- * @plugindesc [v1.3] 仙剑98柔情版合体技（围攻）：默认合体技/装备覆盖/消耗全员回合/发动者走合体站位按Y排序图层
+ * @plugindesc [v1.3] 仙剑98柔情版合体技（kBattleActionCoopMagic）：默认合体技/装备覆盖/消耗全员回合/发动者走合体站位按Y排序图层
  * @author AI Assistant
  *
  * @help
  * 复刻仙剑98柔情版合体技（对照 sdlpal fight.c / uibattle.c / global.c）：
+ *
+ * ⚠ 正名：合体技 = kBattleActionCoopMagic（battle.h:55），**不是**「围攻」。
+ *   「围攻」= 杂项菜单里的 fAutoAttack（词条 word 56，uibattle.c 1386-1392），
+ *   由 palBattleAuto.js 实现；两者是原版两套完全不同的机制。
  *
  * ===== 机制来源 =====
  * 1. 合体技归属（用户确认的 98 柔情版规则）：
@@ -55,7 +59,8 @@
 
     // 合体施法站位（fight.c 3602 rgwCoopPos，PAL 320x200 坐标 → 屏幕按 boxWidth/320 缩放）
     const COOP_POS = [[208, 157], [234, 170], [260, 183]];
-    const BATTLE_MS = 40;
+    if (window.PAL98_SPEED == null) window.PAL98_SPEED = 1;
+    const battleMs = () => 40 / (window.PAL98_SPEED || 1);
 
     //=============================================================================
     // 演出参数（对照 sdlpal 逆向，可按需微调）
@@ -68,9 +73,9 @@
     // D4 发动者吟唱期的 iColorShift=6（fight.c 3943，调色板偏移 → 近似为整体提亮）
     const COOP_CASTER_TONE = [64, 64, 64, 0];
     // D7 收尾：特效播完后敌人颤抖 3 帧 + delay 5 帧（fight.c 4046-4047）
-    const POST_MAGIC_MS = 3 * BATTLE_MS + 5 * BATTLE_MS;
+    const POST_MAGIC_MS = () => 3 * battleMs() + 5 * battleMs();
     // D2 召唤型：全员 iColorShift 1→10 的渐亮时长（fight.c 3120-3128，10 帧）
-    const SUMMON_FADE_MS = 10 * BATTLE_MS;
+    const SUMMON_FADE_MS = () => 10 * battleMs();
 
     //=============================================================================
     // 发动者施法序列（fight.c 3938-3949，发动合体技且走位完成后开始）：
@@ -86,18 +91,18 @@
     // 所以发动者的序列前面要等够 ①+② 的时间。
     PalBattleCoop.coopIntroWaits = function () {
         const others = Math.max(0, this.contributors().length - 1);
-        return 6 * BATTLE_MS + others * 3 * BATTLE_MS;
+        return 6 * battleMs() + others * 3 * battleMs();
     };
 
     PalBattleCoop.buildCoopCasterSteps = function (sprite) {
         return [
             { wait: this.coopIntroWaits() },          // 等走位 + 其他参战者依次施法
-            { frame: 5 }, { wait: 5 * BATTLE_MS },    // 发动者吟唱（fight.c 3943-3945，带 iColorShift）
-            { frame: 6 }, { wait: 3 * BATTLE_MS },    // 发动者出招（fight.c 3947-3949）
-            { wait: 1 * BATTLE_MS },                  // D8 OffMagicAnim 开头 delay 1 帧（fight.c 2659）
+            { frame: 5 }, { wait: 5 * battleMs() },    // 发动者吟唱（fight.c 3943-3945，带 iColorShift）
+            { frame: 6 }, { wait: 3 * battleMs() },    // 发动者出招（fight.c 3947-3949）
+            { wait: 1 * battleMs() },                  // D8 OffMagicAnim 开头 delay 1 帧（fight.c 2659）
             { spell: true },                          // 释放点：合体仙术动画自此开始
-            { frame: 6 }, { wait: 20 * BATTLE_MS },
-            { moveAbs: [0, 0], ms: 6 * BATTLE_MS }    // 走回原地（fight.c 4058-4072）
+            { frame: 6 }, { wait: 20 * battleMs() },
+            { moveAbs: [0, 0], ms: 6 * battleMs() }    // 走回原地（fight.c 4058-4072）
         ];
     };
 
@@ -237,14 +242,14 @@
     //（fight.c 4056-4103）
     //=============================================================================
 
-    const COOP_WALK_MS = 6 * BATTLE_MS; // 14帧≈240ms=原版6战斗帧
+    const COOP_WALK_MS = () => 6 * battleMs(); // 14帧≈240ms=原版6战斗帧
 
     // 召唤型合体技（灵珠 → 风神/雷神/雪妖/山神/火神，wType=kMagicTypeSummon=9）：
     // 原版走另一条分支（fight.c 3865-3869），不站位、不依次施法 ——
     // 全员 iColorShift 1→10 渐亮（fight.c 3120-3128），随后被召唤神【顶替】，
     // battle.c 389-405：只要召唤神在场，玩家精灵整体不入绘制序列（不是变透明）。
     // 本项目没有召唤神精灵资源，退化为「渐亮 → 隐藏」，特效由序列的 spell 点播放。
-    const SUMMON_GOD_MS = 10 * BATTLE_MS; // 召唤神出场占位时长（无资源时的近似）
+    const SUMMON_GOD_MS = () => 10 * battleMs(); // 召唤神出场占位时长（无资源时的近似）
 
     PalBattleCoop.stageCoopCast = function (caster, action) {
         const meta = PalBattleCore.parseMeta(action.item());
@@ -253,7 +258,7 @@
             : 0;
         const now = performance.now();
         // D7：特效播完还要 PostMagicAnim（敌人颤抖 3 帧）+ delay 5 帧才归位（fight.c 4046-4047）
-        const until = now + Math.max(total, 16 * BATTLE_MS) + POST_MAGIC_MS;
+        const until = now + Math.max(total, 16 * battleMs()) + POST_MAGIC_MS();
         const k = Graphics.boxWidth / 320;
 
         // ---- D2 召唤型：全员渐亮 → 隐藏 ----
@@ -262,8 +267,8 @@
                 const sp = PalBattleAnim.spriteOf(a);
                 if (!sp) continue;
                 sp._palCoopFadeFrom = now;
-                sp._palCoopFadeUntil = now + SUMMON_FADE_MS;
-                sp._palCoopHideAt = now + SUMMON_FADE_MS;
+                sp._palCoopFadeUntil = now + SUMMON_FADE_MS();
+                sp._palCoopHideAt = now + SUMMON_FADE_MS();
                 sp._palCoopReturnAt = until;
                 sp._palCoopRestoreOpacity = true;
             }
@@ -297,7 +302,7 @@
 
         // 三人同一帧起跑、同一时长，否则会因 Window_BattleLog 的
         // waitForMovement 把发动者的走位推迟到队友之后（变成依次走位）
-        const ticks = Math.max(1, Math.round(COOP_WALK_MS / 1000 * 60));
+        const ticks = Math.max(1, Math.round(COOP_WALK_MS() / 1000 * 60));
         for (const [a, idx] of slots) {
             const sp = PalBattleAnim.spriteOf(a);
             if (!sp) continue;
@@ -311,7 +316,7 @@
         const casterSp = PalBattleAnim.spriteOf(caster);
         if (casterSp) {
             casterSp._palCoopToneFrom = now + this.coopIntroWaits();
-            casterSp._palCoopToneUntil = casterSp._palCoopToneFrom + 5 * BATTLE_MS;
+            casterSp._palCoopToneUntil = casterSp._palCoopToneFrom + 5 * battleMs();
         }
 
         // D3 其余参战者【从最后一个向前】依次摆吟唱帧5（fight.c 3927-3941：
@@ -319,7 +324,7 @@
         // 原版摆帧5 后一直保持帧5，直到归位循环才回帧0 —— 不切帧6
         const others = members.filter(a => a !== caster).reverse();
         others.forEach((a, order) => {
-            a._palCoopChantFrom = now + COOP_WALK_MS + order * 3 * BATTLE_MS;
+            a._palCoopChantFrom = now + COOP_WALK_MS() + order * 3 * battleMs();
             a._palCoopChantUntil = until;
             a._palCoopSpellAt = 0;
         });
@@ -352,7 +357,7 @@
         // D2 召唤型：iColorShift 1→10 渐亮 → 隐藏（召唤神顶替，battle.c 389-405）
         if (this._palCoopFadeUntil) {
             if (t < this._palCoopFadeUntil) {
-                const p = Math.min(1, (t - this._palCoopFadeFrom) / SUMMON_FADE_MS);
+                const p = Math.min(1, (t - this._palCoopFadeFrom) / SUMMON_FADE_MS());
                 const step = Math.max(1, Math.ceil(p * 10));
                 const v = 24 * step;
                 this.setColorTone([v, v, v, 0]);
@@ -380,7 +385,7 @@
         _update.call(this);
         if (this._palCoopReturnAt && performance.now() >= this._palCoopReturnAt &&
             !PalBattleAnim.isBusy(this)) {
-            this.startMove(0, 0, Math.round(6 * BATTLE_MS / 1000 * 60)); // 240ms
+            this.startMove(0, 0, Math.round(6 * battleMs() / 1000 * 60)); // 240ms
             this._palCoopReturnAt = 0;
             if (this._palCoopRestoreOpacity) {
                 this.visible = true;   // 召唤型合体技：特效播完恢复可见
@@ -409,7 +414,8 @@
         this.beginCoopMagic();
     };
 
-    // 合体技行动开始（右侧“合体”按钮与杂项菜单“围攻”共用）
+    // 合体技行动开始（只由指令盘右侧“合体”按钮触发；杂项菜单第 1 项是「围攻」，
+    // 走 palBattleAuto，与本函数无关）
     // 发动成功即标记 _pendingPalCoop：行动确认后消耗全部角色行动轮次（见下方包装）
     Scene_Battle.prototype.beginCoopMagic = function () {
         const actor = BattleManager.actor();

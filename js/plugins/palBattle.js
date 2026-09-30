@@ -260,9 +260,14 @@
     Window_BattleStatus.prototype.drawItemBackground = function (index) { };
     Window_BattleStatus.prototype.drawDigits = Window_PaladinPartyStatus.prototype.drawDigits;
 
+    // ⚠ 必须与上方 refresh() 画底板的几何严格一致（Data918 宽 75 → 225px）：
+    // 战斗选人窗 _actorWindow 的 rect 复用 statusWindowRect，鼠标 hitTest 按这里的
+    // itemRect 判定。之前写死 113（旧底板宽度），与实画格子的位置/宽度都对不上，
+    // 导致点伙伴栏永远选不中人或选错人（键盘走光标移动，不受影响）。
     Window_BattleStatus.prototype.itemRect = function (index) {
         const scale = 3;
-        const boxW = 113 * scale;
+        const bg = ImageManager.loadSystem("Data918");
+        const boxW = (bg.isReady() ? bg.width : 75) * scale;
         const gap = 8;
         return new Rectangle(index * (boxW + gap), 0, boxW, 105);
     };
@@ -421,8 +426,8 @@
     //-----------------------------------------------------------------------------
     // 仙剑98风格头顶指示器实现（红色箭头回合内永久显示）
     //-----------------------------------------------------------------------------
-    // 全局指示器状态管理器
-    const Pal98IndicatorManager = {
+    // 全局指示器状态管理器（挂到 window 供 palBattleAuto / palBattleMisc 跨插件调用）
+    const Pal98IndicatorManager = (window.Pal98IndicatorManager = {
         config: {
             fps: 15,
             frameInterval: 1000 / 15,
@@ -553,7 +558,7 @@
             this.state.yellowTriangle.visible = false;
             this.state.yellowTriangle.target = null;
         }
-    };
+    });
 
     // 在战斗精灵集创建完成后初始化指示器
     const _Spriteset_Battle_createBattleField = Spriteset_Battle.prototype.createBattleField;
@@ -587,6 +592,52 @@
         _Scene_Battle_update.call(this);
         if (this._spriteset) {
             Pal98IndicatorManager.update(this._spriteset.battlerSprites());
+        }
+        this.updatePalActorTouchSelect();
+    };
+
+    //=============================================================================
+    // 选人阶段（仙术/道具选我方目标）：鼠标悬停在战场伙伴立绘上 = 选中该伙伴，
+    // 点击已选中的伙伴 = 确认（对齐 MZ 窗口"悬停点选 + 点击确认"的习惯）。
+    // 底栏伙伴框的点击由 Window_BattleActor 的 hitTest 处理（itemRect 已对齐底板）。
+    //=============================================================================
+    Scene_Battle.prototype.updatePalActorTouchSelect = function () {
+        const win = this._actorWindow;
+        if (!win || !win.isOpenAndActive()) return;
+        const hover = TouchInput.isHovered();
+        const click = TouchInput.isTriggered();
+        if (!hover && !click) return;
+        const pos = new Point(TouchInput.x, TouchInput.y);
+        const members = $gameParty.battleMembers();
+        for (const sp of this._spriteset.battlerSprites()) {
+            const b = sp._battler;
+            if (!b || !b.isActor()) continue;
+            const idx = members.indexOf(b);
+            if (idx < 0) continue;
+            // ⚠ MZ 的 Sprite_Actor 是"壳"：真正的立绘在子精灵 _mainSprite 上
+            //（父精灵自身无帧，_frame.width = 0），必须对 _mainSprite 做命中测试
+            const node = (sp._mainSprite && sp._mainSprite._frame &&
+                sp._mainSprite._frame.width > 0) ? sp._mainSprite : sp;
+            const sx = node.scale ? node.scale.x || 1 : 1;
+            const sy = node.scale ? node.scale.y || 1 : 1;
+            const fw = (node._frame && node._frame.width) || (node.width / sx) || 0;
+            const fh = (node._frame && node._frame.height) || (node.height / sy) || 0;
+            if (fw <= 0 || fh <= 0) continue;
+            const ax = node.anchor ? node.anchor.x || 0 : 0;
+            const ay = node.anchor ? node.anchor.y || 0 : 0;
+            // 触摸点逆变换到精灵本地坐标（未缩放帧空间），按 anchor 包围盒判定
+            const lp = node.worldTransform.applyInverse(pos);
+            if (lp.x < -ax * fw || lp.x > (1 - ax) * fw ||
+                lp.y < -ay * fh || lp.y > (1 - ay) * fh) continue;
+            // 命中：未选中 → 选中（黄色三角跟过去）；已选中 → 点击时确认
+            if (win.index() === idx) {
+                const enabled = typeof win.isEnabled === "function" ? win.isEnabled(b) : b.isAlive();
+                if (click && enabled) win.processOk();
+            } else {
+                win.select(idx);
+                if (click) SoundManager.playCursor();
+            }
+            break;
         }
     };
 

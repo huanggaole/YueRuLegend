@@ -22,6 +22,8 @@ var $plugins =
 {"name":"palBattleMagic","status":true,"description":"[v1.0] 仙剑98柔情版战斗法术动画（特效序列帧/吹飞位移/扭曲/受击颤抖/结算时序）","parameters":{}},
 {"name":"palBattleCoop","status":true,"description":"[v1.0] 仙剑98柔情版合体技（装备挂载/全员扣体力/合力伤害/列队施法演出）","parameters":{}},
 {"name":"palBattleMisc","status":true,"description":"[v1.0] 仙剑98柔情版战斗杂项菜单（九宫格子菜单：围攻/道具/防御/逃跑/状态）","parameters":{}},
+{"name":"palBattleAuto","status":true,"description":"[v2.0] 仙剑98柔情版围攻（fAutoAttack 自动攻击）：杂项菜单/A键开启、全员自动普攻、ESC取消、右上角金色围攻指示","parameters":{}},
+{"name":"palBattleHotkey","status":true,"description":"[v1.0] 仙剑98柔情版原版快捷键（战斗 R重复/F自动施法/D防御/E使用/W投掷/Q逃跑/S状态/A围攻；地图 E道具/W装备/F仙术/S状态/Q退出）","parameters":{}},
 {"name":"palBattleConfuse","status":true,"description":"[v1.0] 仙剑98柔情版混乱状态攻击队友（fight.c 1308/1743/3448/3760）","parameters":{}},
 {"name":"palBattleSe","status":true,"description":"[v1.0] 仙剑98柔情版战斗音效（按 sdlpal fight.c 时机接入 sfxNNN）","parameters":{"volume":"90","muteDefaultSe":"true"}},
 {"name":"PAL98_Dialogue","status":true,"description":"[v2.0] 仙剑98柔情版 文字对话样式 | PAL98 Classic Dialogue System","parameters":{"FontSize":"48","LineHeight":"54","TitleColor":"#38c0a8","BodyColor":"#ffffff","ShadowOffsetX":"2","ShadowOffsetY":"2","FaceScale":"3","DialogueRegionHeight":"180","TopFaceX":"-66","TopFaceY":"-66","BottomFaceX":"-66","BottomFaceY":"-66","TopTextX":"-132","TopTextY":"0","BottomTextX":"0","BottomTextY":"66"}},

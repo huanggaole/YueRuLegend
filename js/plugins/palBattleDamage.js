@@ -43,7 +43,8 @@
     const DIGIT_W = 6, DIGIT_H = 8;           // 原版点阵尺寸（320 系）
     const DIGIT_STEP = DIGIT_W * DIGIT_SCALE; // 18px = 原版 6px × k，正好等于图宽，相邻不叠压
 
-    const FRAME_MS = 40;                      // BATTLE_FPS = 25（battle.h:28）
+    const FRAME_MS = 40;                      // BATTLE_FPS = 25（battle.h:28），飘字速度随 window.PAL98_SPEED 缩放
+    if (window.PAL98_SPEED == null) window.PAL98_SPEED = 1; // 默认 1 = 原版速度
     const LIFE_FRAMES = 24;                   // 400ms @60fps（原版 10 帧 × 40ms）
     const RISE_STEP = 1;                      // 每 40ms 上飘 1 个 320 单位 ≈ 3px
     const MAX_SHOWNUM = 16;                   // BATTLEUI_MAX_SHOWNUM（uibattle.h:81）
@@ -81,9 +82,12 @@
     // Sprite_Damage
     //=============================================================================
 
+    // 快照优先：多段攻击同一帧结算时，后一击会 clearResult() 覆盖前一击，
+    //  palBattleAnim 在 startDamagePopup 时把结算数据快照进 _palShot 传进来，
+    // 这里不再读实时的 result()（那是最后一击的数据）
     Sprite_Damage.prototype.setup = function (target) {
-        const result = target.result();
-        this._duration = LIFE_FRAMES;
+        const result = this._palShot || target.result();
+        this._duration = Math.round(LIFE_FRAMES / (window.PAL98_SPEED || 1));
         this._palStart = performance.now();
         if (result.missed || result.evaded) return; // 原版：Miss/闪避无任何文字
         if (result.hpAffected || result.hpDamage !== 0) {
@@ -129,8 +133,8 @@
         if (this._duration > 0) {
             this._duration--;
             const elapsed = performance.now() - (this._palStart || performance.now());
-            if (elapsed >= LIFE_FRAMES * (1000 / 60)) this._duration = 0; // 掉帧也按时消失
-            const up = Math.floor(elapsed / FRAME_MS) * RISE_STEP * k();
+            if (elapsed >= LIFE_FRAMES * (1000 / 60) / (window.PAL98_SPEED || 1)) this._duration = 0; // 掉帧也按时消失
+            const up = Math.floor(elapsed / (FRAME_MS / (window.PAL98_SPEED || 1))) * RISE_STEP * k();
             for (const child of this.children) {
                 child.y = -up;
             }
@@ -201,11 +205,13 @@
     // Sprite_Battler：位置、上限、不堆叠（rmmz_sprites.js:572）
     //=============================================================================
 
-    Sprite_Battler.prototype.createDamageSprite = function () {
+    Sprite_Battler.prototype.createDamageSprite = function (entry) {
         if (active >= MAX_SHOWNUM) return; // 16 个槽位满了就丢弃
         const sprite = new Sprite_Damage();
         sprite.x = this.x; // 个位中心落在 battler 中心 + 3（320 系）
+        sprite._palShot = entry || null; // 多段攻击的伤害快照（见 setup 注释）
         sprite.setup(this._battler);
+        sprite._palShot = null;
         if (sprite.children.length === 0) return; // 无可显示内容（Miss / 0 / 敌人真气）
         const off = topOffsetOf(this._battler, sprite._colorType);
         const min = PAL98_DAMAGE.topMargin * k();

@@ -18,7 +18,7 @@
  *  3. 特效播完才允许行动结束并弹出伤害数字（原版时序 fight.c 4261→4270→4322，
  *     BattleManager.updateAction 被门控）：
  *     · 我方受法者：受伤帧4+击退（_palHurtAt 推迟到特效结束，palBattleAnim 支持未来时刻）
- *     · 敌方受法者：受击红闪 + 原地颤抖（-8/+4/-2 PAL 单位三帧缓动，
+ *     · 敌方受法者：受击提亮 + 原地颤抖（-8/+4/-2 PAL 单位三帧缓动，
  *       fight.c 3208-3238 PAL_BattleShowPostMagicAnim）
  *  4. 特效播放期间不倒地、不渐隐（死亡判断推迟到动画之后，palBattleAnim 门控）。
  *
@@ -43,8 +43,13 @@
  *   320×200 全屏序列帧和"火焰段循环/震屏/波纹"，所以默认仍走序列帧。
  *
  * 特殊表现：
- *  · 风系攻击仙术（备注 elem=1 且伤害型）：受法者全程随机抖动位移并缓慢漂移
- *    （原版 iBlow，仙术脚本 0x006B "Blow away enemies"），结束归位；
+ *  · 吹飞（原版 iBlow，脚本指令 0x006B "Blow away enemies"）：
+ *    每帧 pos += RandomLong(0, iBlow) 或 RandomLong(iBlow, 0)，y 取一半（fight.c 2681-2694）。
+ *    ⚠ 触发条件是【仙术对象的 wScriptOnUse 里含 0x006B】，不是"风系"。
+ *    全库 0x006B 只有 2 处（Objects.csv）：
+ *      obj314 风卷残云 mid=72 → operand -2；obj315 风神 mid=73 → operand -3。
+ *    负值 = 往左上吹；风咒(mid0) 等其它风系仙术原版【没有】吹飞。
+ *    见 PalBattleMagic.BLOW_TABLE。
  *  · 波纹仙术（MAGIC.wWave>0，如鬼降 mid=68）：受法者色调脉冲 + 轻微缩放摆动
  *    （近似原版屏幕波纹的局部扭曲）。
  * 需排在 palBattleAnim / palBattleCore 之后加载。
@@ -62,7 +67,8 @@
     // fx(文件号) -> 帧数（img/animations/<fx>-<1..n>.png 盘点结果）；原版 wEffect=fx-1
     const FX_FRAMES = { 1: 8, 2: 7, 3: 16, 4: 8, 5: 5, 6: 26, 7: 12, 8: 16, 9: 13, 10: 6, 11: 10, 12: 14, 13: 15, 14: 8, 15: 8, 16: 16, 17: 8, 18: 13, 19: 12, 20: 3, 21: 6, 22: 33, 23: 11, 24: 22, 25: 7, 26: 20, 27: 31, 28: 20, 29: 24, 30: 24, 31: 36, 32: 8, 33: 16, 34: 38, 35: 11, 36: 15, 37: 20, 38: 25, 39: 9, 40: 40, 41: 17, 42: 24, 43: 38, 44: 6, 45: 16, 46: 7, 47: 10, 48: 10, 49: 9, 50: 8, 51: 7, 52: 6, 53: 8, 54: 16, 55: 15 };
 
-    const BATTLE_MS = 40;
+    if (window.PAL98_SPEED == null) window.PAL98_SPEED = 1;
+    const battleMs = () => 40 / (window.PAL98_SPEED || 1);
 
     let activeCount = 0;
     PalBattleMagic.isEffectPlaying = () => activeCount > 0;
@@ -87,10 +93,213 @@
         return Math.max(0, t); // 0 = 不循环火焰段（sdlpal：l = (n-fire)*0 + n）
     }
 
+    // 取仙术表条目（palBattleAnim 要用同表的 fireDelay / 每帧时长）
+    PalBattleMagic.magicEntry = function (meta) {
+        return meta && meta.mid !== undefined ? (MAGIC_TABLE[meta.mid] || null) : null;
+    };
+
+    //=============================================================================
+    // 吹飞（iBlow）：原版由仙术脚本指令 0x006B 设置，不是按元素判定的
+    //
+    // script.c 2049-2054：g_Battle.iBlow = (SHORT)operand[0]
+    // 整个 Export/Data/Scripts.json 里 0x006B 只出现 2 次（id 43103 / 43105，
+    // operand FFFE=-2 / FFFD=-3），归属见 Objects.csv：
+    //   obj314 风卷残云（Word0=72 → mid 72）Word3(wScriptOnUse)=43103 → iBlow = -2
+    //   obj315 风神    （Word0=73 → mid 73）Word3(wScriptOnUse)=43105 → iBlow = -3
+    // 所以【只有这两个仙术】会吹飞；风咒(mid0)、旋风咒(mid44)等风系仙术原版不动。
+    //=============================================================================
+    PalBattleMagic.BLOW_TABLE = { 72: -2, 73: -3 };
+
+    PalBattleMagic.blowAmount = function (meta) {
+        if (!meta || meta.mid === undefined) return 0;
+        return PalBattleMagic.BLOW_TABLE[meta.mid] || 0;
+    };
+
+    //=============================================================================
+    // 召唤仙术（wType=9 Summon）—— 我方施法专用分支
+    //
+    // fight.c 3072-3187 PAL_BattleShowPlayerSummonMagicAnim 的流程：
+    //   ① 98 版：先播仙术音 magic.wSound（3132-3115，在提亮【之前】）
+    //   ② 我方全员提亮 iColorShift = 1..10，每级 1 战斗帧（3120-3128，共 10 帧）
+    //   ③ 载入召唤神立绘：F.MKF chunk = wSpecific + 10，
+    //      摆位 PAL(240 + wXOffset, 165 + wYOffset)，锚点【底部中心】
+    //      （battle.c 173：x - 宽/2, y - 高）
+    //   ④ 背景色变换 sBackgroundColorShift = wEffectTimes（3154 淡入后即关闭）
+    //   ⑤ PAL_BattleFadeScene 淡入：12 × 6 步 × 16ms ≈ 1152ms（battle.c 634-639）
+    //   ⑥ 立绘帧动画：帧 0..n-1，每帧 (wSpeed+5)*10ms（3160-3181）
+    //   ⑦ 收尾：PAL_BattleShowPlayerOffMagicAnim 播【wEffect 指向的仙术】的序列帧
+    //      —— 就是"受击方播最高系魔法的动画"（风神→风卷残云 mid72）
+    //
+    // ⚠ 召唤类【不走 FIRE.MKF】：MAGIC_TABLE 的 entry[0] 对 mtype 9 不是特效号，
+    //   而是 wEffect + 1 = 落地特效仙术的 mid + 1（导出器 1 基命名）。
+    //   之前按"特效帧图缺失"报的 fx 62/73/78/90 就是这么来的 —— 素材并不缺。
+    // ⚠ 敌方施法【没有】召唤分支（fight.c 敌方流程里没有 SummonMagicAnim 调用点），
+    //   所以只有我方（含合体技，fight.c 3868 传 wPlayerIndex=-1）会走到这里。
+    //=============================================================================
+
+    // 召唤神立绘：mid -> {g: sv_actors 组号, n: 帧数, name}
+    // 组号 = Magics.csv 的 wSpecific + 11（F.MKF chunk = wSpecific + 10，
+    // 而 img/sv_actors 是 1 基命名，chunk i → 组 i+1）。
+    // 归属按画面内容核定（哈里叔叔 2026-09-30）：
+    //   11 武神 / 12 天剑 / 13 雪妖 / 14 山神 / 15 风神
+    //   16 酒神 / 17 雷神 / 18 剑神 / 19 火神
+    PalBattleMagic.SUMMON_TABLE = {
+        19: { g: 11, n: 4, name: "武神" },
+        21: { g: 12, n: 13, name: "天剑" },
+        22: { g: 13, n: 2, name: "雪妖" },
+        25: { g: 14, n: 6, name: "山神" },
+        73: { g: 15, n: 2, name: "风神" },
+        75: { g: 16, n: 5, name: "酒神" },
+        76: { g: 17, n: 3, name: "雷神" },
+        90: { g: 18, n: 5, name: "剑神" },
+        94: { g: 19, n: 7, name: "火神" }
+    };
+
+    // 淡入时长（PAL_BattleFadeScene：12 × 6 步 × 16ms = 1152ms）
+    PalBattleMagic.SUMMON_FADE_MS = 1152;
+
+    // 技能（或 meta）是不是召唤仙术
+    PalBattleMagic.isSummon = function (item) {
+        const meta = item && PalBattleCore.parseMeta ? PalBattleCore.parseMeta(item) : item;
+        const e = meta ? PalBattleMagic.magicEntry(meta) : null;
+        return !!(e && e[1] === 9);
+    };
+
+    PalBattleMagic.summonInfo = function (meta) {
+        if (!meta || meta.mid === undefined) return null;
+        return PalBattleMagic.SUMMON_TABLE[meta.mid] || null;
+    };
+
+    // 落地特效 = wEffect 指向的仙术（entry[0] 是 wEffect+1，故 mid = entry[0]-1）
+    PalBattleMagic.landEntry = function (meta) {
+        const e = PalBattleMagic.magicEntry(meta);
+        if (!e || e[1] !== 9) return null;
+        const mid = (e[0] | 0) - 1;
+        return mid >= 0 ? (MAGIC_TABLE[mid] || null) : null;
+    };
+
+    // RandomLong(a, b) 闭区间（sdlpal util.c）
+    function randomLong(a, b) {
+        return a + Math.floor(Math.random() * (b - a + 1));
+    }
+
+    // 特效每帧时长（fight.c 2729-2730）
+    PalBattleMagic.frameMs = function (meta) {
+        const e = PalBattleMagic.magicEntry(meta);
+        return e ? frameMsOf(e) : 40;
+    };
+
+    // wFireDelay：特效播到第几帧时，【施法者】才切换到释放动作（敌人 fight.c 2932-2938）
+    PalBattleMagic.fireDelay = function (meta) {
+        const e = PalBattleMagic.magicEntry(meta);
+        return e ? Math.max(0, e[8] || 0) : 0;
+    };
+
+    //=============================================================================
+    // 仙术播完后的「后置表现」（原版并不会"特效一停就完事"）
+    //
+    //  · 我方辅助/防御仙术（wType 4 ApplyToPlayer / 5 ApplyToParty）：
+    //    受术者（5 时 = 全体在场队友）做 iColorShift 0→5→6→5→…→0 的提亮渐变，
+    //    共 13 帧（fight.c 2573-2605 PAL_BattleShowPlayerDefMagicAnim 尾部）。
+    //  · 我方变身（wType 8 Trance）：施法者自身 i*2 共 6 帧（fight.c 4228-4232）。
+    //  · 攻击型（wType 0/1/2/3）：受击敌人原地颤抖 3 帧（-8/+4/-2），
+    //    只中间那一帧提亮 6，再 1 帧收尾 = 4 帧
+    //    （fight.c 3208-3246 PAL_BattleShowPostMagicAnim）。
+    //
+    // ⚠ 项目此前【完全没有】前两类（元灵归心术/五气朝元/还魂咒等播完就走），
+    //   攻击型还把那 1 帧提亮拉成 5 帧 —— 这是"复刻版比原版赶"的直接来源。
+    //=============================================================================
+
+    PalBattleMagic.POST = {
+        def: 13,     // 我方辅助/防御仙术：13 帧渐变提亮
+        trance: 6,   // 变身
+        attack: 4    // 攻击型：敌人 PostMagicAnim（3 帧颤抖 + 1 帧收尾）
+    };
+
+    // 本次行动"特效播完之后还要再演几帧"
+    PalBattleMagic.postFrames = function (subject, meta) {
+        const e = PalBattleMagic.magicEntry(meta);
+        if (!e) return 0;
+        if (subject && subject.isEnemy && subject.isEnemy()) return 0; // 敌方施法的收尾走它自己的受击表现
+        switch (e[1]) {
+            case 4: case 5: return PalBattleMagic.POST.def;
+            case 8: return PalBattleMagic.POST.trance;
+            // 召唤落地后同样走攻击型收尾（fight.c 4257 → 4323 的 PostMagicAnim）
+            case 9: return PalBattleMagic.POST.attack;
+            case 0: case 1: case 2: case 3: return PalBattleMagic.POST.attack;
+            default: return 0;
+        }
+    };
+
+    // 召唤阶段（全员提亮 + 淡入 + 立绘帧动画），不含落地特效
+    PalBattleMagic.summonDuration = function (meta) {
+        const e = PalBattleMagic.magicEntry(meta);
+        if (!e || e[1] !== 9) return 0;
+        const s = PalBattleMagic.summonInfo(meta);
+        const n = s ? s.n : 0;
+        return 10 * battleMs() +                 // ② 全员提亮 1→10
+            PalBattleMagic.SUMMON_FADE_MS +      // ⑤ 淡入
+            n * frameMsOf(e);                    // ⑥ 立绘帧动画（召唤仙术自己的 wSpeed）
+    };
+
+    // 提亮渐变：挂 battler._palRamp，由 Sprite 的 update 驱动（见文件末尾 applyRamp）
+    // holdFrames：summon 用 —— 提亮到 10 级之后【保持】多少帧（原版直到落地特效结束）
+    PalBattleMagic.startRamp = function (battlers, kind, holdFrames) {
+        const list = (battlers || []).filter(b => b);
+        if (!list.length) return;
+        let frames;
+        if (kind === "trance") frames = PalBattleMagic.POST.trance;
+        else if (kind === "summon") frames = 10 + Math.max(0, holdFrames || 0);
+        else frames = PalBattleMagic.POST.def;
+        const at = performance.now();
+        for (const b of list) b._palRamp = { at: at, ms: frames * battleMs(), kind: kind, last: -1 };
+    };
+
+    // 第 f 帧的 iColorShift 级别（原版整数序列）
+    PalBattleMagic.rampLevel = function (r, t) {
+        const f = Math.floor((t - r.at) / battleMs());
+        if (f < 0) return 0;
+        if (r.kind === "trance") return f < 6 ? f * 2 : 0;   // fight.c 4230：0,2,4,6,8,10
+        if (r.kind === "summon") {
+            // fight.c 3120-3128：iColorShift = 1..10（每级 1 战斗帧），之后【保持 10】
+            return f < 10 ? f + 1 : 10;
+        }
+        if (f >= 13) return 0;                                // fight.c 2573-2605：13 帧
+        return f < 6 ? f : 12 - f;                            // 0,1,2,3,4,5,6,5,4,3,2,1,0
+    };
+
+    // 级别 → 屏幕色调（iColorShift=6 对应 PalBattleAnim.HIT_TONE，其余按比例）
+    // 召唤能到 10 级（原版比我方防御仙术的 6 级更亮），上限钳到 255
+    PalBattleMagic.rampTone = function (level) {
+        const base = (PalBattleAnim && PalBattleAnim.HIT_TONE) || [110, 110, 110, 0];
+        const k = level / 6;
+        const c = v => Math.min(255, Math.round(v * k));
+        return [c(base[0]), c(base[1]), c(base[2]), base[3] || 0];
+    };
+
+    // 特效播完那一刻触发后置表现
+    PalBattleMagic.startPost = function (subject, meta) {
+        const e = PalBattleMagic.magicEntry(meta);
+        if (!e) return;
+        if (subject && subject.isEnemy && subject.isEnemy()) return;
+        if (e[1] === 4 || e[1] === 5) {
+            const ts = ((subject && subject._palTargets) || []).filter(t => t && t.isAlive && t.isAlive());
+            PalBattleMagic.startRamp(ts, "def");
+        } else if (e[1] === 8) {
+            PalBattleMagic.startRamp([subject], "trance");
+        }
+    };
+
     // 特效总时长：n 帧一遍 + [fireDelay,末) 段循环 times 次 + shake 帧（fight.c 2661-2664）
     PalBattleMagic.effectDuration = function (meta) {
         const entry = meta && MAGIC_TABLE[meta.mid];
         if (!entry) return 0;
+        // 召唤：先演召唤神，再演落地特效（落地特效 = wEffect 指向的仙术）
+        if (entry[1] === 9) {
+            const land = PalBattleMagic.landEntry(meta);
+            const landDur = land ? PalBattleMagic.effectDuration({ mid: (entry[0] | 0) - 1 }) : 0;
+            return PalBattleMagic.summonDuration(meta) + landDur;
+        }
         const n = FX_FRAMES[entry[0]] || 0;
         if (!n) return 0;
         const fire = Math.max(0, Math.min(entry[8], n - 1));
@@ -104,15 +313,19 @@
         // 二/三人分别是 17 / 20 帧 —— 用错会让伤害结算与伤害数字早于特效 40~160ms。
         const act = BattleManager._action;
         if (act && act._palCoop && window.PalBattleCoop) {
-            return PalBattleCoop.coopIntroWaits() + 9 * BATTLE_MS;
+            return PalBattleCoop.coopIntroWaits() + 9 * battleMs();
         }
         if (subject && subject.isEnemy && subject.isEnemy()) {
+            // 与 palBattleAnim.buildEnemyMagic 逐步对齐（fight.c 4683-4707）：
+            // 前移 2 帧 + [无吟唱帧区时补 1 帧] + 吟唱帧区（每帧 actWait）。
+            // actWait 下限取 1，与 enemyAnimMeta() 一致（旧版取 2 会整体早 40ms/帧）。
             const em = PalBattleCore.enemyMeta(subject);
-            const magicFrames = em && em.frames ? (em.frames[1] || 0) : 0;
-            const actWait = em && em.actWait ? em.actWait : 2;
-            return 4 * BATTLE_MS + magicFrames * actWait * BATTLE_MS;
+            const magicFrames = em && em.frames ? Math.max(0, em.frames[1] || 0) : 0;
+            const actWait = em && em.actWait ? Math.max(1, em.actWait) : 1;
+            return (2 + (magicFrames === 0 ? 1 : 0)) * battleMs() +
+                magicFrames * actWait * battleMs();
         }
-        return 16 * BATTLE_MS; // 4 前移 + 2 停顿 + 10 吟唱（buildActorMagic）
+        return 16 * battleMs(); // 4 前移 + 2 停顿 + 10 吟唱（buildActorMagic）
     };
 
     // 仙术伤害/恢复的视觉延迟：特效播完才弹出（原版动画播完才结算，fight.c 4261→4322）
@@ -279,10 +492,14 @@
         // 吹飞 / 波纹是全场效果，由 owner 统一施加（fight.c 2683-2694 遍历所有敌人）
         for (const ts of this._affect) {
             if (!ts) continue;
-            // 风系吹飞：受法者随机抖动漂移（fight.c 2681-2694，pos += RandomLong(0,iBlow)）
+            // 吹飞（fight.c 2681-2694）：
+            //   blow = iBlow>0 ? RandomLong(0, iBlow) : RandomLong(iBlow, 0)
+            //   x += blow;  y += blow / 2   —— PAL 单位，负值往左上，逐帧累积
             if (this._opts.blow) {
-                ts._palBlowX = Math.min(24, (ts._palBlowX || 0) + Math.random() * 5 * kPal());
-                ts._palBlowY = (ts._palBlowY || 0) + Math.random() * 2.5 * kPal();
+                const ib = this._opts.blow;
+                const v = ib > 0 ? randomLong(0, ib) : randomLong(ib, 0);
+                ts._palBlowX = (ts._palBlowX || 0) + v * kPal();
+                ts._palBlowY = (ts._palBlowY || 0) + Math.trunc(v / 2) * kPal();
             }
             // 波纹扭曲（wWave>0，如鬼降）：色调脉冲 + 轻微缩放摆动
             if (this._opts.wave) {
@@ -307,7 +524,7 @@
                 ts._palBlowX = 0;
                 ts._palBlowY = 0;
                 if (this._opts.wave) {
-                    // 红闪已接管色调时不动它（仙术红闪与特效同时结束，此情形罕见）
+                    // 提亮已接管色调时不动它（仙术提亮与特效同时结束，此情形罕见）
                     const b = ts._enemy || ts._actor;
                     if (!(b && b._palFlashUntil && performance.now() < b._palFlashUntil)) {
                         ts.setColorTone([0, 0, 0, 0]);
@@ -324,6 +541,144 @@
     };
 
     //=============================================================================
+    // 召唤神立绘播放器（fight.c 3142-3181）
+    //
+    // 时间轴（从释放点起算）：
+    //   [0, 10帧)                     全员提亮 1→10（立绘尚未出现）
+    //   [10帧, 10帧+1152ms)           淡入（opacity 0→255）
+    //   [10帧+1152ms, +n×frameMs)     立绘帧动画，末帧定格
+    //   结束                          → 交棒给落地特效
+    //=============================================================================
+
+    function Sprite_PalSummon() { this.initialize.apply(this, arguments); }
+    Sprite_PalSummon.prototype = Object.create(Sprite.prototype);
+    Sprite_PalSummon.prototype.constructor = Sprite_PalSummon;
+
+    Sprite_PalSummon.prototype.initialize = function (info, entry, xoff, yoff, onDone) {
+        Sprite.prototype.initialize.call(this);
+        this._info = info;
+        this._entry = entry;
+        this._onDone = onDone;
+        this._ms = frameMsOf(entry);                 // (wSpeed+5)*10ms，用召唤仙术自己的 wSpeed
+        this._n = info ? info.n : 0;
+        this._fi = -1;
+        this._elapsed = 0;
+        this._pt = performance.now();
+        this._bright = 10 * battleMs();              // 提亮阶段
+        this._fade = PalBattleMagic.SUMMON_FADE_MS;  // 淡入阶段
+        this._done = false;
+        this.anchor.x = 0.5;
+        this.anchor.y = 1;  // 底部中心（battle.c 173-174）
+        // 摆位 PAL(240 + wXOffset, 165 + wYOffset)
+        this.x = (240 + (xoff || 0)) * kPal();
+        this.y = (165 + (yoff || 0)) * kPal();
+        this.scale.x = kPal();
+        this.scale.y = kPal();
+        this.opacity = 0;   // 淡入前不可见
+        this._frames = [];
+        if (info) {
+            for (let i = 1; i <= info.n; i++) {
+                this._frames.push(ImageManager.loadSvActor(info.g + "-" + i));
+            }
+        }
+        if (this._frames.length) {
+            this.bitmap = this._frames[0];
+            this._fi = 0;
+        }
+    };
+
+    Sprite_PalSummon.prototype.update = function () {
+        Sprite.prototype.update.call(this);
+        if (this._done) return;
+        const t = performance.now();
+        let dt = t - this._pt;
+        this._pt = t;
+        if (dt > 250) dt = 250; // 切后台防跳帧
+        if (dt < 0) dt = 0;
+        this._elapsed += dt;
+        const e = this._elapsed;
+        if (e < this._bright) return;            // 提亮阶段：立绘还没出现
+        const fe = e - this._bright;
+        if (fe < this._fade) {                   // 淡入
+            this.opacity = Math.round(255 * (fe / this._fade));
+            return;
+        }
+        this.opacity = 255;
+        const ae = fe - this._fade;              // 立绘帧动画
+        if (this._n > 0) {
+            const fi = Math.min(this._n - 1, Math.floor(ae / this._ms));
+            if (fi !== this._fi && this._frames[fi]) {
+                this._fi = fi;
+                this.bitmap = this._frames[fi];
+            }
+            if (ae >= this._n * this._ms) this.finish();
+        } else {
+            this.finish();
+        }
+    };
+
+    Sprite_PalSummon.prototype.finish = function () {
+        if (this._done) return;
+        this._done = true;
+        // ⚠ 先交棒（内部 activeCount++）再自减，避免中途归零让门控提前放行
+        if (this._onDone) this._onDone();
+        if (this.parent && this.parent.removeChild) this.parent.removeChild(this);
+        activeCount = Math.max(0, activeCount - 1);
+    };
+
+    // 落地特效：复用 Sprite_PalEffect，但用的是【wEffect 指向的仙术】的参数
+    // （风神→风卷残云 mid72；酒神→mid61；雷神→mid77；剑神→mid89）
+    PalBattleMagic.playLandEffect = function (field, subject, meta, entry, targets) {
+        const land = PalBattleMagic.landEntry(meta);
+        if (!land) return false;
+        const fx = land[0], n = FX_FRAMES[fx];
+        if (!n) return false;
+        const spots = PalBattleMagic.effectSpots(subject, land, targets);
+        if (!spots.length) return false;
+        const frames = [];
+        for (let i = 1; i <= n; i++) frames.push(ImageManager.loadAnimation(fx + "-" + i));
+        const opts = {
+            // 吹飞用【召唤仙术自己】的 iBlow（风神 -3），不是落地仙术的
+            blow: PalBattleMagic.blowAmount(meta),
+            wave: (land[7] || 0) > 0
+        };
+        const affect = [];
+        for (const t of targets) {
+            const s = PalBattleAnim.spriteOf(t);
+            if (s) affect.push(s);
+        }
+        spots.forEach((spot, i) => {
+            field.addChild(new Sprite_PalEffect(frames, land, spot, affect, opts, i === 0));
+            activeCount++;
+        });
+        return true;
+    };
+
+    // 召唤流程入口：提亮 → 立绘 → 落地特效（替代普通特效通道）
+    PalBattleMagic.startSummon = function (field, subject, action, meta, entry, targets) {
+        const info = PalBattleMagic.summonInfo(meta);
+        if (!info) return false;
+        // ② 全员提亮 1→10 后【保持 10】，一直亮到落地特效结束（原版到下次渲染才回落）
+        const land = PalBattleMagic.landEntry(meta);
+        const landFrames = land
+            ? Math.round(PalBattleMagic.effectDuration({ mid: (entry[0] | 0) - 1 }) / battleMs()) : 0;
+        const hold = Math.round(PalBattleMagic.SUMMON_FADE_MS / battleMs()) +
+            info.n + landFrames;
+        const team = $gameParty.battleMembers().filter(a => a && a.isAlive && a.isAlive());
+        PalBattleMagic.startRamp(team, "summon", hold);
+        // ① 98 版：magic.wSound 在提亮【之前】播（fight.c 3112-3115）
+        if (window.PalBattleSe && action && action.item) {
+            PalBattleSe.play(PalBattleSe.skill(action.item()));
+        }
+        const sprite = new Sprite_PalSummon(info, entry, entry[2] || 0, entry[3] || 0, () => {
+            PalBattleMagic.playLandEffect(field, subject, meta, entry, targets);
+        });
+        field.addChild(sprite);
+        activeCount++;
+        return true;
+    };
+
+    //=============================================================================
     // 释放点触发：为每个受法者开一个特效精灵
     //=============================================================================
 
@@ -333,12 +688,18 @@
         // 症状就是"后一位施法者放的是前一位的法术特效"。
         // _palCastAction 由 palBattleAnim 在 performAction 里按精灵绑定。
         const action = (casterSprite && casterSprite._palCastAction) || BattleManager._action;
+        // 释放点标记：进本函数就等于释放点已到（gateAction 靠它防止
+        // "特效还没创建就放行"的竞态）。放在入口，覆盖所有提前 return 的路径
+        // —— 放在末尾的话，无目标/无帧图等路径会让门控死锁。
+        if (action) action._palSpellFired = true;
         if (!action || !action.isSkill || !action.isSkill()) return;
         const meta = PalBattleCore.parseMeta(action.item());
         const entry = meta && MAGIC_TABLE[meta.mid];
         if (!entry) return;
         const fx = entry[0], n = FX_FRAMES[fx];
-        if (!n) return;
+        // ⚠ 召唤的 entry[0] 不是特效号（是"落地特效仙术的 mid+1"），
+        //   不能在这里按 FX_FRAMES 判空 —— 否则召唤会被当成"无特效"直接跳过。
+        if (!n && entry[1] !== 9) return;
         const scene = SceneManager._scene;
         const field = scene && scene._spriteset && scene._spriteset._battleField;
         if (!field) return;
@@ -351,18 +712,25 @@
             if ($dataAnimations && $dataAnimations[dbId]) {
                 $gameTemp.requestAnimation(targets.length ? targets : [subject], dbId);
             }
+            action._palSpellFired = true;
             return;
         }
 
-        // ② FIRE.MKF 序列帧：按 wType 决定摆几份、摆在哪
+        // ② 召唤（wType 9）：提亮 → 召唤神立绘 → 落地特效（不走 FIRE.MKF 直读）
+        if (entry[1] === 9) {
+            if (PalBattleMagic.startSummon(field, subject, action, meta, entry, targets)) return;
+            // 没有立绘信息（表缺失）时退回普通通道继续尝试
+            if (PalBattleMagic.summonInfo(meta)) return;
+        }
+
+        // ③ FIRE.MKF 序列帧：按 wType 决定摆几份、摆在哪
         const spots = PalBattleMagic.effectSpots(subject, entry, targets);
         if (!spots.length) return;
         const frames = [];
         for (let i = 1; i <= n; i++) frames.push(ImageManager.loadAnimation(fx + "-" + i));
-        const offensive = !!(action.isDamage && action.isDamage());
         const opts = {
-            blow: offensive && meta.elem === 1, // 风系攻击仙术
-            wave: (entry[7] || 0) > 0          // 波纹（鬼降等）
+            blow: PalBattleMagic.blowAmount(meta), // 原版 0x006B（只有风卷残云/风神有）
+            wave: (entry[7] || 0) > 0             // 波纹（鬼降等）
         };
         // 吹飞/波纹影响到的精灵（原版是全场遍历，不只看落点）
         const affect = [];
@@ -388,9 +756,22 @@
         const useDb = PalBattleMagic.dbAnimationId(action) > 0;
         if (!useDb && PalBattleMagic.effectDuration(meta) <= 0) return false; // 无特效仙术不拦
         const elapsed = performance.now() - (bm._palActionStartAt || performance.now());
-        if (elapsed < PalBattleMagic.castOffset(bm._subject, meta)) return true;
+        const cast = PalBattleMagic.castOffset(bm._subject, meta);
+        if (elapsed < cast) return true;
+        // ⚠ 竞态防护：Scene_Battle.update 里 updateBattleProcess()（→本函数）先跑，
+        //   spriteset.update（→updateSeq→playEffect）后跑。跨过释放点的那一帧
+        //   activeCount 仍是 0 —— 没有 action._palSpellFired 就会当场放行，
+        //   特效只能孤零零播完而战斗早已走到下一个人（"动画没播完就换人"的主因）。
+        if (!useDb && !action._palSpellFired) return true;
         if (useDb) return PalBattleMagic.isDbAnimationPlaying();
-        return PalBattleMagic.isEffectPlaying();
+        if (PalBattleMagic.isEffectPlaying()) return true;
+        // 特效刚播完 → 启动后置表现，并把行动再压 post 帧（原版节奏）
+        if (!action._palPostStarted) {
+            action._palPostStarted = true;
+            PalBattleMagic.startPost(bm._subject, meta);
+        }
+        return elapsed < cast + PalBattleMagic.effectDuration(meta) +
+            PalBattleMagic.postFrames(bm._subject, meta) * battleMs();
     };
 
     const _updateAction = BattleManager.updateAction;
@@ -402,6 +783,11 @@
     const _startAction = BattleManager.startAction;
     BattleManager.startAction = function () {
         this._palActionStartAt = performance.now();
+        // 每次行动重置：释放点标记 / 后置表现标记（双动、连续行动都会复用流程）
+        if (this._action) {
+            this._action._palSpellFired = false;
+            this._action._palPostStarted = false;
+        }
         _startAction.call(this);
     };
 
@@ -414,14 +800,20 @@
     };
 
     //=============================================================================
-    // 受击表现对齐：我方受伤帧/击退推迟；敌方红闪推迟 + 原地颤抖
+    // 受击表现对齐：我方受伤帧/击退推迟；敌方提亮推迟 + 原地颤抖
     //=============================================================================
 
     const _actorPerformDamage = Game_Actor.prototype.performDamage;
     Game_Actor.prototype.performDamage = function () {
         _actorPerformDamage.call(this);
         const d = PalBattleMagic.spellDamageDelay();
-        if (d > 0) this._palHurtAt = performance.now() + d;
+        if (d > 0) {
+            this._palHurtAt = performance.now() + d;
+            // 受击提亮同步推迟到特效播完（仍只亮 1 个战斗帧）
+            const t = performance.now() + d;
+            this._palFlashFrom = t;
+            this._palFlashUntil = t + battleMs();
+        }
     };
 
     const _enemyPerformDamage = Game_Enemy.prototype.performDamage;
@@ -431,8 +823,10 @@
         if (action && action.isSkill && action.isSkill()) {
             const d = PalBattleMagic.spellDamageDelay();
             const t = performance.now() + d;
-            this._palFlashFrom = t;             // 红闪推迟到特效播完
-            this._palFlashUntil = t + 5 * BATTLE_MS;
+            // fight.c 3233：颤抖 3 帧里只有【中间那一帧】提亮（i==1 → iColorShift=6），
+            // 首尾两帧是 0。旧版连亮 5 帧，比原版慢了 4 帧。
+            this._palFlashFrom = t + battleMs();
+            this._palFlashUntil = t + 2 * battleMs();
             this._palTrembleAt = t;             // 法术受击：原地颤抖
         }
     };
@@ -444,9 +838,9 @@
         const b = this._enemy;
         if (b && b._palTrembleAt) {
             const e = performance.now() - b._palTrembleAt;
-            if (e >= 0 && e < 3 * BATTLE_MS) {
+            if (e >= 0 && e < 3 * battleMs()) {
                 const seq = [-8, 4, -2];
-                this.x += seq[Math.min(2, Math.floor(e / BATTLE_MS))] * kPal();
+                this.x += seq[Math.min(2, Math.floor(e / battleMs()))] * kPal();
             }
         }
     };
@@ -461,5 +855,40 @@
         }
     };
 
+    //=============================================================================
+    // 提亮渐变的驱动：挂在 palBattleAnim 的 update 之后，覆盖它的二值提亮
+    //=============================================================================
+
+    function applyRamp(sprite) {
+        const b = sprite._actor || sprite._enemy;
+        const r = b && b._palRamp;
+        if (!r) return;
+        const t = performance.now();
+        if (t < r.at) return;                       // 还没开始
+        if (t >= r.at + r.ms) {                     // 播完：清掉
+            if (r.last !== 0) sprite.setColorTone([0, 0, 0, 0]);
+            b._palRamp = null;
+            return;
+        }
+        const lv = PalBattleMagic.rampLevel(r, t);
+        if (lv !== r.last) {
+            r.last = lv;
+            sprite.setColorTone(PalBattleMagic.rampTone(lv));
+        }
+    }
+
+    const _rampActorUpdate = Sprite_Actor.prototype.update;
+    Sprite_Actor.prototype.update = function () {
+        _rampActorUpdate.call(this);
+        applyRamp(this);
+    };
+
+    const _rampEnemyUpdate = Sprite_Enemy.prototype.update;
+    Sprite_Enemy.prototype.update = function () {
+        _rampEnemyUpdate.call(this);
+        applyRamp(this);
+    };
+
     PalBattleMagic.Sprite_PalEffect = Sprite_PalEffect;
+    PalBattleMagic.applyRamp = applyRamp;
 })();
