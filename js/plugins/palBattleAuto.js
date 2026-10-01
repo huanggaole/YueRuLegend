@@ -37,8 +37,9 @@
  *   · startActorCommandSelection 钩子：围攻开启时【不弹指令盘】，直接给当前角色
  *     补普攻并 BattleManager.selectNextCommand()。每帧推进一人，与原版"逐个提交"同节奏；
  *     全员补完自然流入 startTurn
- *   · 围攻期间保持状态栏可见：98 版（非 PAL_CLASSIC）下 uibattle.c 900-927 的
- *     玩家信息框是无条件绘制的（kShowPlayerInfoBoxGuard 那段 if 只在 PAL_CLASSIC 里）
+ *   · 围攻期间【隐藏】底部伙伴状态栏（原版 PAL_CLASSIC 默认构建：uibattle.c 894
+ *     if (!fAutoAttack) 生效，信息框不绘制，只剩右上角「围攻」二字）；
+ *     sdlpal 的 PAL_CLASSIC 是默认开启的（common.h: #ifndef ENABLE_REVISIED_BATTLE）
  *   · MZ 键盘 ESC 只映射 "escape"（"cancel" 仅手柄）→ 两个都判断
  *
  * ===== 调参 =====
@@ -91,7 +92,10 @@
         if (window.Pal98IndicatorManager) Pal98IndicatorManager.hideAll();
         const scene = SceneManager._scene;
         if (scene && scene._actorCommandWindow) {
-            scene._actorCommandWindow.close();
+            // ⚠ 别用 close()：MZ 的 startActorCommandSelection() 只 show() 从不 open()，
+            //   而 close() 会把 openness 清零 → 之后只能靠 setup() 里的 open() 救回来。
+            //   工程惯例（palBattleMisc 的 onMiscStatus/onMiscEscape）也是只 hide+deactivate。
+            scene._actorCommandWindow.hide();
             scene._actorCommandWindow.deactivate();
         }
 
@@ -160,6 +164,15 @@
         _startBattle.call(this);
     };
 
+    // 战斗结束（胜/负/逃）时收起围攻：胜利结算画面期间指示被 _palVictory
+    // 压着不画，但结算淡出后、场景退出前的几帧里标志还是开的，「围攻」二字
+    // 会在右上角闪回（原版战斗一结束 UI 即整体消失，不存在该状态）。
+    const _endBattle = BattleManager.endBattle;
+    BattleManager.endBattle = function (result) {
+        this._palAutoAtk = false;
+        _endBattle.call(this, result);
+    };
+
     //=============================================================================
     // Scene_Battle：围攻期间接管角色指令（不弹指令盘）
     //=============================================================================
@@ -167,6 +180,8 @@
     const _startActorCommandSelection = Scene_Battle.prototype.startActorCommandSelection;
     Scene_Battle.prototype.startActorCommandSelection = function () {
         if (PalBattleAuto.isOn()) {
+            // 原版围攻走 goto end：这一位不再弹指令盘，头顶指示器也不画
+            if (window.Pal98IndicatorManager) Pal98IndicatorManager.hideAll();
             this.hideSubInputWindows();
             PalBattleAuto.fillCurrent();
             BattleManager.selectNextCommand();
@@ -175,15 +190,15 @@
         _startActorCommandSelection.call(this);
     };
 
-    // 围攻期间状态栏保持可见（98 版非 PAL_CLASSIC：玩家信息框无条件绘制）
+    // 围攻期间状态栏隐藏（原版行为）：
+    // sdlpal 默认构建开启 PAL_CLASSIC（common.h: #ifndef ENABLE_REVISIED_BATTLE →
+    // PAL_CLASSIC），该分支下 uibattle.c 894 行 if (!fAutoAttack) 生效 —— 围攻时
+    // 玩家信息框不绘制，只剩右上角「围攻」二字（Steam 98 柔情版实测如此）。
+    // 取消围攻后 isOn() 归 false，走 MZ 默认逻辑自动恢复显示。
     const _updateStatusWindowPosition = Scene_Battle.prototype.updateStatusWindowPosition;
     Scene_Battle.prototype.updateStatusWindowPosition = function () {
         if (PalBattleAuto.isOn()) {
-            if (this.isPalItemUIOpen && this.isPalItemUIOpen()) {
-                this._statusWindow.hide();
-                return;
-            }
-            this._statusWindow.show();
+            this._statusWindow.hide();
             return;
         }
         _updateStatusWindowPosition.call(this);
@@ -262,8 +277,20 @@
     };
 
     PalBattleAuto.update = function (scene) {
+        // 结算/升级界面期间连「围攻」指示也撤掉（原版战斗结束后画面只剩场景+面板）
+        const panelsUp = !!(scene && (scene._palVictory || scene._palLevelUp));
         if (PalBattleAuto._indicator && PalBattleAuto._indicator.parent === scene) {
-            PalBattleAuto._indicator.visible = PalBattleAuto.isOn();
+            PalBattleAuto._indicator.visible = PalBattleAuto.isOn() && !panelsUp;
+        }
+
+        // 兜底：围攻期间头顶一律不画指示器（原版 uibattle.c 991 goto end）。
+        // 红箭头唯一的显示入口是 Window_ActorCommand.setup()，而围攻会拦掉
+        // startActorCommandSelection —— 但只要有任何旁路把它画出来，这里每帧压掉。
+        if (PalBattleAuto.isOn() && window.Pal98IndicatorManager) {
+            const st = Pal98IndicatorManager.state;
+            if (st && (st.redArrow.visible || st.yellowTriangle.visible)) {
+                Pal98IndicatorManager.hideAll();
+            }
         }
 
         // A 键 = kKeyAuto：随时切换（uibattle.c 882-886，顺手把杂项菜单退回主盘）

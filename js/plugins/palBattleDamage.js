@@ -218,6 +218,9 @@
         let top = this.y - off * k();
         if (top < min) top = min; // fight.c:643/673/699
         sprite.y = top + DIGIT_H * DIGIT_SCALE; // anchor.y = 1 → 数字底部
+        // 伤害数字恒在最上层（原版是画在特效之上的 UI 层）：
+        // 仙术特效现在固定 fxZ=9000，数字若继续走 battleField 的 Y 排序会被盖住
+        sprite.zIndex = (window.PalBattleMagic ? PalBattleMagic.fxZ : 9000) + 500;
         active++;
         sprite._palCounted = true;
         this._damages.push(sprite);

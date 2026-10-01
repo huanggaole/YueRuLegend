@@ -74,8 +74,6 @@
     const COOP_CASTER_TONE = [64, 64, 64, 0];
     // D7 收尾：特效播完后敌人颤抖 3 帧 + delay 5 帧（fight.c 4046-4047）
     const POST_MAGIC_MS = () => 3 * battleMs() + 5 * battleMs();
-    // D2 召唤型：全员 iColorShift 1→10 的渐亮时长（fight.c 3120-3128，10 帧）
-    const SUMMON_FADE_MS = () => 10 * battleMs();
 
     //=============================================================================
     // 发动者施法序列（fight.c 3938-3949，发动合体技且走位完成后开始）：
@@ -103,6 +101,49 @@
             { spell: true },                          // 释放点：合体仙术动画自此开始
             { frame: 6 }, { wait: 20 * battleMs() },
             { moveAbs: [0, 0], ms: 6 * battleMs() }    // 走回原地（fight.c 4058-4072）
+        ];
+    };
+
+    //=============================================================================
+    // 召唤型合体技（装备灵珠 / 角色的合体技本体是 wType=9）
+    // 原版走 fight.c 3865-3869 的【另一条分支】，与普通合体技完全不同：
+    //   PAL_BattleShowPlayerPreMagicAnim(wPlayerIndex, TRUE);
+    //   PAL_BattleShowPlayerSummonMagicAnim((WORD)-1, wObject);
+    // 即：没有「音效29 + 全员走到 rgwCoopPos + 其余人依次摆帧5」那一套，只有
+    // ① 发动者前移 4 小步（fight.c 2360-2369，每步 1 帧）
+    // ② delay 2 帧 + 摆帧5（fight.c 2371-2378）
+    // ③ fSummon=TRUE 所以【不播】10 帧手部光效（fight.c 2380-2442 整块跳过）
+    // ④ delay 1 帧（fight.c 2444）→ 紧接 SummonMagicAnim
+    // 前摇合计 7 帧 = 280ms（普通合体技是 17/20 帧，差别很大）。
+    // 之后全员位置【不再改动】（fight.c 4049 明确 Summon 型没有归位循环，
+    // 由 OffMagicAnim 尾部 fight.c 3065-3068 一次性把全员 pos 复原）。
+    //=============================================================================
+
+    // 前摇帧数（fight.c 2360-2444，fSummon=TRUE 分支）
+    PalBattleCoop.COOP_SUMMON_INTRO_FRAMES = 4 + 2 + 1;
+
+    // 该技能是否为召唤类合体技（Magics.csv 的 wType == kMagicTypeSummon == 9）
+    PalBattleCoop.isSummonSkill = function (item) {
+        const meta = item && PalBattleCore.parseMeta ? PalBattleCore.parseMeta(item) : null;
+        return !!(meta && meta.mtype === 9);
+    };
+
+    PalBattleCoop.buildCoopSummonSteps = function (sprite) {
+        const action = sprite && sprite._palCastAction;
+        const item = action && action.item();
+        const meta = item && PalBattleCore.parseMeta ? PalBattleCore.parseMeta(item) : null;
+        let hold = 20 * battleMs();
+        if (meta && PalBattleMagic) {
+            hold = Math.max(hold, PalBattleMagic.effectDuration(meta));
+        }
+        return [
+            { moveAbs: [-30, -12], ms: 4 * battleMs() }, // ① 前移 4 小步
+            { wait: 2 * battleMs() },                    // ② delay 2
+            { frame: 5 },                                // ② 摆吟唱帧
+            { wait: 1 * battleMs() },                    // ④ delay 1
+            { spell: true },                             // 释放点 → 召唤链路（startSummon）
+            { wait: hold },                              // 提亮+淡入+立绘+落地特效
+            { moveAbs: [0, 0], ms: 4 * battleMs() }      // OffMagicAnim 尾部归位（fight.c 3065-3068）
         ];
     };
 
@@ -248,8 +289,7 @@
     // 原版走另一条分支（fight.c 3865-3869），不站位、不依次施法 ——
     // 全员 iColorShift 1→10 渐亮（fight.c 3120-3128），随后被召唤神【顶替】，
     // battle.c 389-405：只要召唤神在场，玩家精灵整体不入绘制序列（不是变透明）。
-    // 本项目没有召唤神精灵资源，退化为「渐亮 → 隐藏」，特效由序列的 spell 点播放。
-    const SUMMON_GOD_MS = () => 10 * battleMs(); // 召唤神出场占位时长（无资源时的近似）
+    // 提亮 / 顶替隐藏 / 落地特效均由 palBattleMagic.startSummon 负责。
 
     PalBattleCoop.stageCoopCast = function (caster, action) {
         const meta = PalBattleCore.parseMeta(action.item());
@@ -261,17 +301,23 @@
         const until = now + Math.max(total, 16 * battleMs()) + POST_MAGIC_MS();
         const k = Graphics.boxWidth / 320;
 
-        // ---- D2 召唤型：全员渐亮 → 隐藏 ----
-        if (meta && meta.mtype === 9) {
-            for (const a of this.contributors()) {
-                const sp = PalBattleAnim.spriteOf(a);
-                if (!sp) continue;
-                sp._palCoopFadeFrom = now;
-                sp._palCoopFadeUntil = now + SUMMON_FADE_MS();
-                sp._palCoopHideAt = now + SUMMON_FADE_MS();
-                sp._palCoopReturnAt = until;
-                sp._palCoopRestoreOpacity = true;
+        // 合体技吞掉所有人的行动（原版 fight.c 3954-3967 重置全员时间条）：
+        // 之前只跳过「输入」，但先手角色已经选好的指令（比如攻击）还留在
+        // _actions 里，轮到他时会照常执行 —— 表现为李逍遥在合体时放了个攻击动画。
+        // ⚠ 这一步必须在【召唤型提前 return 之前】：原版 fight.c 3865-3869 的
+        //   召唤分支同样消耗全员回合，只是不做站位走位而已。
+        for (const a of this.allMembers()) {
+            if (a !== caster && a._actions && a._actions.length) {
+                a._actions = []; // 行动时 currentAction() 为 undefined → 直接跳过
+                a.setActionState("waiting");
             }
+        }
+
+        // ---- D2 召唤型：不走合体站位，只由发动者做 PreMagicAnim(fSummon=TRUE) ----
+        // 原版 fight.c 3865-3869 这里【没有】站位/依次施法/音效29 任何一步；
+        // 队员被召唤神顶替后隐藏（battle.c 389-405）由 palBattleMagic.startSummon 负责，
+        // 召唤神立绘 + 落地特效也复用同一套 —— 本老版本的「渐亮→隐藏」退化解已废止。
+        if (this.isSummonSkill(action.item())) {
             return;
         }
 
@@ -280,16 +326,6 @@
 
         // ---- 普通合体技：同步走位 + 从队尾向队首依次施法 ----
         const members = this.contributors();
-
-        // 合体技吞掉所有人的行动（原版 fight.c 3954-3967 重置全员时间条）：
-        // 之前只跳过「输入」，但先手角色已经选好的指令（比如攻击）还留在
-        // _actions 里，轮到他时会照常执行 —— 表现为李逍遥在合体时放了个攻击动画。
-        for (const a of this.allMembers()) {
-            if (a !== caster && a._actions && a._actions.length) {
-                a._actions = []; // 行动时 currentAction() 为 undefined → 直接跳过
-                a.setActionState("waiting");
-            }
-        }
 
         // D9 站位编号：按【全体队员】顺序分配（fight.c 3898-3922 的 t++ 在 continue 之前，
         // 不健康的人也占一个号，只是原地不动）
@@ -354,23 +390,6 @@
             if (t >= this._palCoopToneUntil) this._palCoopToneUntil = 0;
         }
 
-        // D2 召唤型：iColorShift 1→10 渐亮 → 隐藏（召唤神顶替，battle.c 389-405）
-        if (this._palCoopFadeUntil) {
-            if (t < this._palCoopFadeUntil) {
-                const p = Math.min(1, (t - this._palCoopFadeFrom) / SUMMON_FADE_MS());
-                const step = Math.max(1, Math.ceil(p * 10));
-                const v = 24 * step;
-                this.setColorTone([v, v, v, 0]);
-            } else {
-                this.setColorTone([0, 0, 0, 0]);
-                this._palCoopFadeUntil = 0;
-                if (this._palCoopHideAt) {
-                    this.visible = false;
-                    this._palCoopHideAt = 0;
-                }
-            }
-        }
-
         // D3 其余参战者：走位完成后摆帧5，一直保持（fight.c 3938）
         if (a._palCoopChantUntil && !PalBattleAnim.isBusy(this)) {
             if (t >= (a._palCoopChantFrom || 0) && t < a._palCoopChantUntil) {
@@ -387,11 +406,6 @@
             !PalBattleAnim.isBusy(this)) {
             this.startMove(0, 0, Math.round(6 * battleMs() / 1000 * 60)); // 240ms
             this._palCoopReturnAt = 0;
-            if (this._palCoopRestoreOpacity) {
-                this.visible = true;   // 召唤型合体技：特效播完恢复可见
-                this.opacity = 255;
-                this._palCoopRestoreOpacity = false;
-            }
             this.setColorTone([0, 0, 0, 0]);
             if (this._actor) {
                 this._actor._palCoopChantUntil = 0;
@@ -451,6 +465,19 @@
 
     const _sceneSelectNextCommand = Scene_Battle.prototype.selectNextCommand;
     Scene_Battle.prototype.selectNextCommand = function () {
+        // ⚠ 无论指令从哪条路来（指令盘右键 / R 重复 / F 自动施法），只要当前提交的
+        //   是这名角色的合体技，都要打上 _palCoop 标记 —— 否则 R 重复出的合体技
+        //   会按普通仙术结算（耗真气、普通公式、普通速度），还会被队友抢先行动
+        //（普通速度排不进行动队首；_palCoop 的 ×10 速度保证合体技第一个执行）。
+        // 原版等价物：fight.c 1417-1424 提交队列里扫到 CoopMagic 就跳过其余人。
+        const actor = BattleManager.actor();
+        const action = BattleManager.inputtingAction();
+        if (actor && action && action.isSkill && action.isSkill() &&
+            !action._palCoop && PalBattleCoop.canUse(actor) &&
+            PalBattleCoop.skillOf(actor) === action.item().id) {
+            action._palCoop = true;
+            BattleManager._pendingPalCoop = true;
+        }
         if (BattleManager._pendingPalCoop) {
             BattleManager._palCoopConsumeAll = true;
             BattleManager._pendingPalCoop = false;

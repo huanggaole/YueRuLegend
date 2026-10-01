@@ -465,7 +465,7 @@
             this.sprites.redArrow.anchor.set(0.5, 1.0);
             this.sprites.redArrow.scale.set(3);
             this.sprites.redArrow.visible = false;
-            this.sprites.redArrow.z = 9999; // 绝对最高层
+            this.sprites.redArrow.zIndex = 9999; // 绝对最高层
             this.sprites.redArrow.bitmap = this.redArrowFrames[0]; // 初始帧
             battleField.addChild(this.sprites.redArrow);
 
@@ -474,7 +474,7 @@
             this.sprites.yellowTriangle.anchor.set(0.5, 1.0);
             this.sprites.yellowTriangle.scale.set(3);
             this.sprites.yellowTriangle.visible = false;
-            this.sprites.yellowTriangle.z = 9999; // 绝对最高层
+            this.sprites.yellowTriangle.zIndex = 9999; // 绝对最高层
             this.sprites.yellowTriangle.bitmap = this.yellowTriangleFrames[0]; // 初始帧
             battleField.addChild(this.sprites.yellowTriangle);
 
@@ -570,7 +570,7 @@
         // MZ 默认按 addChild 顺序固定（敌人创建时按 x 排一次），走位时不会换层，
         // 于是合体技里 2/3 号位发动时的前后关系与原版相反 —— 这里改用 zIndex 排序。
         this._battleField.sortableChildren = true;
-        if (this._backSprite) this._backSprite.z = -1; // 背景永远垫底
+        if (this._backSprite) this._backSprite.zIndex = -1; // 背景永远垫底
     };
 
     // D1/D11：每帧把 Y 写进 zIndex（敌人、我方、仙术特效同属一个排序池）
@@ -578,11 +578,11 @@
     Spriteset_Battle.prototype.update = function () {
         _Spriteset_Battle_update.call(this);
         if (!this._battleField) return;
-        for (const s of this.battlerSprites()) s.z = s.y;
+        for (const s of this.battlerSprites()) s.zIndex = s.y;
         for (const c of this._battleField.children) {
             // 未显式设层级的（仙术特效等）也按自己的 Y 参与排序；
-            // 指示器 z=9999、背景 z=-1 不受影响
-            if (c.z === undefined || c.z === 0) c.z = c.y;
+            // 指示器 zIndex=9999、留场帧 zIndex=keepZ（默认 -1）不受影响
+            if (c.zIndex === undefined || c.zIndex === 0) c.zIndex = c.y;
         }
     };
 

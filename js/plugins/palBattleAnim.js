@@ -259,6 +259,23 @@
 
     PalBattleAnim.isBusy = sprite => !!(sprite._palSeq && sprite._palSeq.length > 0);
 
+    // 全场是否还有动作序列在跑（死亡渐隐等"全局演出"的闸门）。
+    // 原版敌人死亡不是在命中帧移除，而是等行动者整套动作打完、
+    // PAL_BattlePostActionCheck（fight.c:718）才把尸体撤掉并淡出场景 ——
+    // 只查受害者自己的序列会让渐隐从伤害结算那一刻就开始，
+    // 数字还没飘敌人就没了（用户反馈"敌人消失之后伤害才出现"）。
+    PalBattleAnim.anySequenceBusy = function () {
+        const scene = SceneManager._scene;
+        const spriteset = scene && scene._spriteset;
+        if (!spriteset || !spriteset.battlerSprites) return false;
+        const sprites = spriteset.battlerSprites();
+        for (let i = 0; i < sprites.length; i++) {
+            const sp = sprites[i];
+            if (sp._palSeq && sp._palSeq.length > 0) return true;
+        }
+        return false;
+    };
+
     // 受击提亮色调（近似原版 iColorShift=6 的"同色相 +6 阶亮度"）；控制台可改
     PalBattleAnim.HIT_TONE = [110, 110, 110, 0];
 
@@ -293,8 +310,18 @@
 
     const _battleManagerIsBusy = BattleManager.isBusy;
     BattleManager.isBusy = function () {
-        return _battleManagerIsBusy.call(this) ||
-            !!(this._spriteset && this._spriteset.isPalSequenceBusy());
+        if (_battleManagerIsBusy.call(this)) return true;
+        const ss = this._spriteset;
+        if (!ss || !ss.isPalSequenceBusy) return false;
+        // 行动阶段且尚有目标未结算：放行结算。伤害必须在挥砍【命中帧】附近结算，
+        // 若等攻击者整套序列（含蓄力/收招回程 ≈19 战斗帧）播完才结算，所有以
+        // "行动开始起算帧数"校准的命中估算（popupDelay ≈12 帧）会整体顺延到
+        // 收招之后 —— 飘字/提亮/死亡渐隐全部后置，表现为"敌人先消失、数字才飘"。
+        // 命中表现的绝对时刻由 hitAt()（行动开始时刻 + 帧数估算）锚定，与结算
+        // 发生在哪一帧解耦。序列/受击/渐隐忙闲只用于"回合阶段"卡下一个行动者
+        // 出手（fight.c 整场严格串行：前一手收招完毕才轮到下一个）。
+        if (this._phase === "action" && this._targets && this._targets.length > 0) return false;
+        return ss.isPalSequenceBusy();
     };
 
     //=============================================================================
@@ -547,8 +574,11 @@
             }
         }
         const dead = !!(b && b.isDead && b.isDead());
-        // 死亡表现（原地渐隐）启动后，受击提亮立即让位；此前提亮正常播放。
-        const deathFading = dead && !PalBattleAnim.isBusy(this) &&
+        // 死亡表现（原地渐隐）启动条件对齐原版 PostActionCheck：等全场动作序列
+        // 与法术特效全部播完再开始（原版在行动收尾才撤走尸体，数字已飘了大半）。
+        // 此前只查受害者自己的序列（受害者没在演动作 → 恒不忙），渐隐从伤害
+        // 结算帧就开始，数字还没出敌人就没了。
+        const deathFading = dead && !PalBattleAnim.anySequenceBusy() &&
             !(window.PalBattleMagic && PalBattleMagic.isEffectPlaying());
         // 受击提亮（原版 iColorShift=6，fight.c 2201-2227/5080-5088）。注意原版
         // 不是闪红：调色板低 4 位 +6 = 同一色相内提亮 6 阶（palcommon.c RLEBlitWith
@@ -751,7 +781,7 @@
         let f = AF.IDLE;
         if (a.isDead()) {
             // 倒地时机：击杀伤害在命中时刻（与伤害数字同时）才倒地 ——
-            // performDamage 里记下 _palDeathAt = 此刻 + popupDelay()。
+            // performDamage 里记下 _palDeathAt = hitAt()（命中帧绝对时刻）。
             // 之前用"全局特效播放中就摆 IDLE"的做法，会让尸体在【任何人】放仙术
             // 特效期间反复站起来、特效结束再倒下（用户反馈"死掉的角色还会站起来"）。
             const deathAt = a._palDeathAt || 0;
@@ -796,9 +826,13 @@
             // 防御姿势由状态（Guard）驱动
         } else if (action.isMagicSkill() || action.isSkill()) {
             if (action._palCoop && window.PalBattleCoop && PalBattleCoop.buildCoopCasterSteps) {
-                // 合体技发动者：走合体站位施法序列（fight.c 3877-3949），
-                // 替换标准 buildActorMagic（合体时发动者不走常规前移）
-                PalBattleAnim.runSeq(sprite, PalBattleCoop.buildCoopCasterSteps(sprite));
+                // 合体技发动者：替换标准 buildActorMagic（合体时发动者不走常规前移）。
+                // 召唤型（装备灵珠）走 fight.c 3865-3869 的另一条分支：
+                // 只有发动者 PreMagicAnim(fSummon=TRUE)，不做合体站位。
+                const coopSeq = PalBattleCoop.isSummonSkill(action.item())
+                    ? PalBattleCoop.buildCoopSummonSteps(sprite)
+                    : PalBattleCoop.buildCoopCasterSteps(sprite);
+                PalBattleAnim.runSeq(sprite, coopSeq);
             } else {
                 PalBattleAnim.runSeq(sprite, PalBattleAnim.buildActorMagic(sprite));
             }
@@ -827,13 +861,18 @@
     Game_Actor.prototype.performDamage = function () {
         Game_Battler.prototype.performDamage.call(this);
         SoundManager.playActorDamage();
-        this._palHurtAt = now(); // 受击帧 + 击退
+        // 受击帧/击退/提亮对齐【命中帧】（原版 fight.c:5054-5080 全在命中当帧发生）。
+        // 命中时刻取 hitAt()（行动开始时刻 + 帧数估算的绝对锚点），与结算发生在
+        // 第几帧解耦；非行动阶段（中毒等）hitAt 退回当前时刻，不推迟。
+        // 仙术由 palBattleMagic 在命中锚点上另行覆盖这两个时间戳。
+        const t = PalBattleAnim.hitAt();
+        this._palHurtAt = t; // 受击帧 + 击退
         // 受击提亮：原版 iColorShift=6 仅 1 个战斗帧（fight.c 5080-5088）
-        this._palFlashFrom = now();
-        this._palFlashUntil = now() + battleMs();
+        this._palFlashFrom = t;
+        this._palFlashUntil = t + battleMs();
         // 致死一击：记下倒地时刻 = 命中时刻（与伤害数字同帧倒地，见 updateFrame）
         if (this.isDead()) {
-            this._palDeathAt = now() + (PalBattleAnim.popupDelay() || 0);
+            this._palDeathAt = t;
         }
     };
 
@@ -868,17 +907,18 @@
 
     Game_Actor.prototype.performMiss = function () {
         SoundManager.playMiss();
-        this._palDodgeAt = now();
+        // 格挡姿势/后退对齐命中帧（fight.c:5023-5027 在攻击方命中当帧判定）
+        this._palDodgeAt = PalBattleAnim.hitAt();
     };
 
     Game_Actor.prototype.performEvasion = function () {
         SoundManager.playEvasion();
-        this._palDodgeAt = now();
+        this._palDodgeAt = PalBattleAnim.hitAt();
     };
 
     Game_Actor.prototype.performMagicEvasion = function () {
         SoundManager.playMagicEvasion();
-        this._palDodgeAt = now();
+        this._palDodgeAt = PalBattleAnim.hitAt();
     };
 
     //=============================================================================
@@ -891,8 +931,7 @@
         const ts = PalBattleAnim.spriteOf(target);
         const es = PalBattleAnim.spriteOf(enemy);
         // 让掩护者刚好在敌人落刀那一刻到位：以命中时刻倒推走位时长
-        const lead = PalBattleAnim.popupDelay ? PalBattleAnim.popupDelay() : 0;
-        const at = now() + Math.max(0, lead - PAL98_COVER.inMs);
+        const at = (PalBattleAnim.hitAt ? PalBattleAnim.hitAt() : now()) - PAL98_COVER.inMs;
         if (cs) {
             const tx = ts ? ts._homeX : cs._homeX;
             const ty = ts ? ts._homeY : cs._homeY;
@@ -952,8 +991,11 @@
     Game_Enemy.prototype.performDamage = function () {
         Game_Battler.prototype.performDamage.call(this);
         SoundManager.playEnemyDamage();
-        this._palFlashFrom = now();
-        this._palFlashUntil = now() + 5 * battleMs(); // 受击提亮
+        // 提亮对齐【命中帧】（fight.c:2201-2207：挥砍特效第 1 帧 iColorShift=6）。
+        // 仙术由 palBattleMagic 覆盖到特效播完。
+        const t = PalBattleAnim.hitAt();
+        this._palFlashFrom = t;
+        this._palFlashUntil = t + 5 * battleMs(); // 受击提亮
     };
 
     //=============================================================================
@@ -999,7 +1041,8 @@
     // 结算，后一击的 apply 会 clearResult() 覆盖前一击 —— 若飘字到点才读 result()，
     // 前几击的数字会整个丢失（症状：双击武器只飘一个数字）。
     // 改为：startDamagePopup 时立即把本次结算【快照】进队列，各带绝对命中时刻
-    // （同一 battler 的第 N 击顺延 N 个挥砍周期，对齐第二圈动画的落刀帧）；
+    // （同一 battler 的第 N 击顺延 N 个真实挥砍间隔 roundGapMs()，对齐第二圈动画的
+    // 落刀帧 —— 序列时钟由 wait 步驱动，不能用 swingMs 全序列和）；
     // Sprite 侧每帧把到点的条目弹出，条目耗尽再清 MZ 标记。
     //=============================================================================
 
@@ -1012,18 +1055,45 @@
                 hpDamage: r.hpDamage, hpAffected: r.hpAffected,
                 mpDamage: r.mpDamage, missed: r.missed, evaded: r.evaded,
                 physical: r.physical, drain: r.drain,
-                at: now() + (PalBattleAnim.popupDelay() || 0) +
-                    this._palPopupQueue.length * (PalBattleAnim.swingMs() || 0) +
+                at: PalBattleAnim.hitAt() +
+                    this._palPopupQueue.length * (PalBattleAnim.roundGapMs() || 0) +
                     PalBattleAnim.popupLag()
             });
         }
         _startDamagePopup.call(this); // MZ 的 _damagePopup 标记，驱动 updateDamagePopup 轮询
     };
 
-    // 飘字额外延迟：等受击动画（提亮/击退 ≈ 5 战斗帧）播完再出数字。
-    // 默认 5 * battleMs()（随 PAL98_SPEED 缩放）；控制台 PAL98_POPUP_LAG = 100 可改绝对毫秒
+    // 飘字额外延迟：默认 0 —— 原版伤害数字与受击提亮在【同一战斗帧】出现
+    //（我方普攻 fight.c:2209：挥砍特效循环 i==0 那一帧调 PAL_BattleDisplayStatChange；
+    //  敌方攻击 fight.c:5078：扣血、ShowNum、iColorShift=6 同帧），数字随后在
+    // 受击动画期间上飘（寿命 10 战斗帧，uibattle.c:1753-1760），而不是等受击
+    // 动画播完再出。设了正值会复现"击杀后敌人消失了数字才飘"。
+    // 控制台 PAL98_POPUP_LAG = 100 可改绝对毫秒
     PalBattleAnim.popupLag = function () {
-        return window.PAL98_POPUP_LAG != null ? window.PAL98_POPUP_LAG : 5 * battleMs();
+        return window.PAL98_POPUP_LAG != null ? window.PAL98_POPUP_LAG : 0;
+    };
+
+    // 多段攻击相邻两击的【真实】间隔（飘字顺延 / 喊声2 偏移共用）。
+    // 序列时钟由 wait 步驱动 —— moveAbs 是即发即弃的补间，下一步 startMove 会
+    // 覆盖还没跑完的位移，所以第二圈落刀帧距第一圈起点 = 一圈 wait + 圈间 2 帧
+    //（单目标 12 帧 480ms / 全体 11 帧 440ms），比 swingMs 的全序列和快 ~1 个位移。
+    // 取不到（无 sprite / 无目标）或敌方时退回 swingMs()。
+    PalBattleAnim.roundGapMs = function () {
+        const subject = BattleManager._subject;
+        if (subject && subject.isActor && subject.isActor() &&
+            PalBattleAnim.buildActorAttack) {
+            const seen = new Set();
+            const targets = (subject._palTargets || []).filter(t =>
+                t && t.isAlive && t.isAlive() && !seen.has(t) && seen.add(t));
+            const multi = targets.length > 1;
+            const sprite = PalBattleAnim.spriteOf(subject);
+            if (sprite && (multi || targets.length > 0)) {
+                const tSprite = multi ? null : PalBattleAnim.spriteOf(targets[0]);
+                const steps = PalBattleAnim.buildActorAttack(sprite, tSprite, multi);
+                return steps.reduce((a, s) => a + (s.wait || 0), 0) + 2 * battleMs();
+            }
+        }
+        return PalBattleAnim.swingMs() || 0;
     };
 
     // 一轮挥砍的完整时长：多段攻击的第 2 击在下一圈动画的落刀帧命中
@@ -1039,12 +1109,28 @@
                 PalBattleAnim.spriteOf(subject), meta, PalBattleAnim.spriteOf(target));
             return steps.reduce((a, s) => a + (s.wait || 0) + (s.ms || 0), 0);
         }
-        // 我方单目标一轮 = 蓄力4 + 冲刺5 + 逼近1 + 挥砍1 + 收招等待3 + 回程5 ≈ 19 帧
+        // ⚠ 动作序列的时钟由 wait 步驱动（moveAbs 是即发即弃的补间，下一步
+        // startMove 会覆盖在跑的位移）——「第一圈起点 → 第二圈落刀帧」=
+        //   单目标：第一圈 wait(4+2+1+3) + 圈间 2 + 第二圈前缀 wait(4+2+1) = 19 帧
+        //   （按步序列 ms 求和会得到 22 帧，那是位移不互相覆盖的理论值，真实更快）
         return 19 * battleMs();
     };
 
-    // 命中时刻估算：敌方普攻在攻击帧区开始时命中，我方普攻在挥砍帧(帧9)命中；
-    // 仙术由 palBattleMagic 包一层（特效剩余时长），道具在序列跑完后（见下）
+    // 本次行动「命中帧」的绝对时刻（performance.now() 域）。
+    // popupDelay 的估算值以【行动开始】为基准（蓄力/冲刺/挥砍的帧数，见下），
+    // 这里锚到 _palActionStartAt 上，与结算（apply）实际发生在第几帧解耦 ——
+    // 结算帧受日志队列/位移忙闲影响在行动头几帧内浮动，若直接用"结算时刻+delay"，
+    // 飘字/提亮会跟着结算帧漂移。palBattleMagic.spellDamageDelay 改为返回
+    // "行动开始起算的总时长"后，本函数对仙术/普攻/道具统一成立。
+    PalBattleAnim.hitAt = function () {
+        const startAt = (BattleManager._phase === "action" && BattleManager._palActionStartAt) ||
+            performance.now();
+        return startAt + (PalBattleAnim.popupDelay() || 0);
+    };
+
+    // 命中帧距【行动开始】的毫秒数：敌方普攻在攻击帧区开始时命中，我方普攻在挥砍帧
+    // （帧9）命中；仙术由 palBattleMagic 包一层（施法偏移+特效时长，同样以行动开始
+    // 为基准）；道具在序列跑完后（fight.c:4369/4405）
     PalBattleAnim.popupDelay = function () {
         if (BattleManager._phase !== "action") return 0;
         const subject = BattleManager._subject;
@@ -1101,7 +1187,9 @@
                 message1: "",
                 message2: "",
                 occasion: 1,
-                repeat: 1,
+                repeats: 1, // ⚠ MZ 字段名是 repeats（复数）：写成 repeat 会让 numRepeats()
+                //   得 NaN → repeatTargets 循环 0 次 → makeTargets 返回空数组 →
+                //   防御行动不执行任何目标，apply 不被调用，防御姿态/减伤全部失效
                 requiredWtypeId1: 0,
                 requiredWtypeId2: 0,
                 scope: 11, // 使用者

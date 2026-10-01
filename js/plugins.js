@@ -18,6 +18,7 @@ var $plugins =
 {"name":"palBattleTarget","status":true,"description":"[v1.0] 仙剑98柔情版目标选择（隐藏敌人列表/闪白指示/冻结指令光标）","parameters":{}},
 {"name":"palBattleDamage","status":true,"description":"[v1.0] 仙剑98柔情版伤害数字（白色伤害/绿色回血/蓝色回MP图片拼合）","parameters":{}},
 {"name":"palBattleVictory","status":true,"description":"[v1.0] 仙剑98柔情版战斗胜利结算画面（获得经验值/打败敌人得N文钱）","parameters":{}},
+{"name":"palBattleDefeat","status":true,"description":"[v1.0] 仙剑98柔情版游戏失败演出（画面渐红+居中对话框「胜败乃兵家常事也/大侠请重新来过吧」+自动读取最后存档）","parameters":{}},
 {"name":"palBattleSkill","status":true,"description":"[v1.0] 仙剑98柔情版战斗仙术选择界面（三列宫格列表+真气栏+仙术说明）","parameters":{}},
 {"name":"palBattleMagic","status":true,"description":"[v1.0] 仙剑98柔情版战斗法术动画（特效序列帧/吹飞位移/扭曲/受击颤抖/结算时序）","parameters":{}},
 {"name":"palBattleCoop","status":true,"description":"[v1.0] 仙剑98柔情版合体技（装备挂载/全员扣体力/合力伤害/列队施法演出）","parameters":{}},

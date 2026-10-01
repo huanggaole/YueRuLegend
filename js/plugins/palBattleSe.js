@@ -126,8 +126,12 @@
         return (meta && meta.snd) || 0;
     };
 
-    // 命中延迟：到「特效/武器真正打到目标」那一刻的毫秒数
+    // 命中延迟：到「特效/武器真正打到目标」那一刻还需多少毫秒（从现在起算）。
+    // 绝对时刻由 hitAt()（行动开始时刻 + 帧数估算）锚定，与调用点无关。
     Se.hitDelay = function () {
+        if (window.PalBattleAnim && PalBattleAnim.hitAt) {
+            return Math.max(0, PalBattleAnim.hitAt() - performance.now());
+        }
         if (window.PalBattleAnim && PalBattleAnim.popupDelay) {
             return PalBattleAnim.popupDelay() || 0;
         }
@@ -169,9 +173,40 @@
         if (!action) return;
 
         // 普攻：fight.c 2124，挥砍帧播武器音
-        //（喊声 attackSound / criticalSound 在结算后由 displayDamage 播，见下）
+        //（喊声 attackSound / criticalSound 在动画函数顶部 2061-2071 —— 即每圈
+        //  【开始冲锋】时喊，不是命中帧；双击每圈各喊一次：3732-3745 整轮动画重跑）
         if (action.isAttack && action.isAttack()) {
-            Se.playAt(Se.actor(this, "weaponSound"), Se.hitDelay());
+            const n = Math.max(1, Math.min(2, action.numRepeats ? action.numRepeats() : 1));
+            const delay = Se.hitDelay();
+            Se.playAt(Se.actor(this, "weaponSound"), delay);
+            // 一轮挥砍时长；双击第二圈 = 再往后一轮 + 圈间间隔 2 战斗帧
+            const swing2 = n > 1 && window.PalBattleAnim && PalBattleAnim.swingMs
+                ? (PalBattleAnim.swingMs() || 0) : 0;
+            if (swing2 > 0) {
+                // 原版二轮是整套动画重跑，武器音每圈落刀帧都播（fight.c 2124 在循环内）
+                Se.playAt(Se.actor(this, "weaponSound"), delay + swing2);
+            }
+
+            // 喊声按【动画锚点】排程，不用结算（displayDamage）时机锚 —— 结算随
+            // 日志队列浮动，曾导致第二声滞后于第二圈冲锋。暴击按行动roll一次
+            // （原版 fCritical 在动画循环外算好，两圈同 flag）。
+            // 第二声偏移 = roundGapMs()：序列时钟由 wait 步驱动（moveAbs 补间会被
+            // 下一步覆盖），第二圈起点距第一圈起点 = 一圈 wait + 圈间 2 帧。
+            if (!action._palAttackMate && (n === 1 || swing2 > 0)) {
+                const t0 = this._palTargets && this._palTargets[0];
+                const crit = t0 && action.itemCri ? Math.random() < action.itemCri(t0) : false;
+                action._palShoutScheduled = true;
+                action._palShoutCrit = crit;
+                const shout = crit
+                    ? Se.actor(this, "criticalSound")
+                    : Se.actor(this, "attackSound");
+                Se.playAt(shout, 0);
+                if (n > 1) {
+                    const off = window.PalBattleAnim && PalBattleAnim.roundGapMs
+                        ? (PalBattleAnim.roundGapMs() || 0) : 0;
+                    if (off > 0) Se.playAt(shout, off);
+                }
+            }
             return;
         }
 
@@ -231,22 +266,32 @@
             const second = action._palActionIndex > 0;
             const noMagic = !meta || (meta.mg || 0) === 0;
             const atkSe = (second && noMagic) ? Se.enemy(this, "mag") : Se.enemy(this, "atk");
+            // 双击敌人（特征码34）：与原版一致两轮动画各配一套音效，
+            // 第二圈命中时刻 = 第一圈 + swingMs()（同我方双击的武器音顺延）
+            const nAtk = Math.max(1, Math.min(2, action.numRepeats ? action.numRepeats() : 1));
+            const swing2 = nAtk > 1 && window.PalBattleAnim && PalBattleAnim.swingMs
+                ? (PalBattleAnim.swingMs() || 0) : 0;
             Se.playAt(atkSe, 0);
+            if (swing2 > 0) Se.playAt(atkSe, swing2);
 
             // fight.c 5003：普攻起手动作音 e.wActionSound。
             //   位置在「wMagicFrames 段动画 + 补步」之后、冲向目标之前，
             //   也就是命中前一帧（98 版要求 != 0 才播；Se.play 对 <=0 自动跳过）。
             Se.playAt(Se.enemy(this, "act"), Math.max(0, Se.hitDelay() - battleMs()));
+            if (swing2 > 0) {
+                Se.playAt(Se.enemy(this, "act"), Math.max(0, Se.hitDelay() - battleMs()) + swing2);
+            }
 
             // fight.c 5084：命中瞬间 e.wCallSound（被掩护时是 coverSound，
             // 那条由 palBattleAnim.runCover 处理）
             Se.playAt(Se.enemy(this, "call"), Se.hitDelay());
+            if (swing2 > 0) Se.playAt(Se.enemy(this, "call"), Se.hitDelay() + swing2);
         }
     };
 
     //=========================================================================
-    // 命中结算：普攻喊声 / 暴击 / 死亡 / 濒死
-    //（原版这些都在伤害算出之后，与本项目 apply 后的时机一致）
+    // 命中结算：普攻喊声（兜底）/ 死亡 / 濒死
+    // 死亡/濒死音锚到命中帧（见下 hitDelayOf）；喊声正常流程在 performAction 排程。
     //=========================================================================
     const _displayDamage = Window_BattleLog.prototype.displayDamage;
     Window_BattleLog.prototype.displayDamage = function (target) {
@@ -256,41 +301,67 @@
         const subject = BattleManager._subject;
         const action = BattleManager._action;
 
-        // 我方普攻喊声：普通 attackSound / 暴击 criticalSound（fight.c 2065/2069）
+        // 我方普攻喊声：普通 attackSound / 暴击 criticalSound（fight.c 2061-2071）
         // ⚠ 混乱打队友时【不喊】（fight.c 3760-3855 整段只有一处 rgwWeaponSound）
+        // 正常流程的喊声已由 performAction 按动画锚点排程（见上，含双击两圈）；
+        // 这里只兜底未走 performAction 的零散路径（如反击），按圈计数：
+        // 全体攻击（AOE）单轮打多个目标只算一圈，仍只喊一次（与原版一致）。
         if (subject && subject.isActor && subject.isActor() && action &&
             action.isAttack && action.isAttack() && !action._palAttackMate &&
-            !subject._palAtkSeDone) {
-            subject._palAtkSeDone = true;
-            Se.play(result.critical
-                ? Se.actor(subject, "criticalSound")
-                : Se.actor(subject, "attackSound"));
+            !action._palShoutScheduled) {
+            const rounds = Math.max(1, Math.min(2,
+                action.numRepeats ? action.numRepeats() : 1));
+            subject._palAtkSeCount = (subject._palAtkSeCount || 0) + 1;
+            const round = subject._palAtkSeCount;
+            if (round <= rounds) {
+                const shout = result.critical
+                    ? Se.actor(subject, "criticalSound")
+                    : Se.actor(subject, "attackSound");
+                const gap = round > 1 && window.PalBattleAnim && PalBattleAnim.swingMs
+                    ? (PalBattleAnim.swingMs() || 0) : 0;
+                if (gap > 0) Se.playAt(shout, gap);
+                else Se.play(shout);
+            }
         }
+
+        // 死亡/濒死音效锚到【本击的命中时刻】（与武器音/飘字/受击提亮同帧），
+        // 不在结算（apply）当帧立即播 —— 结算发生在行动开头（日志队列一清空就
+        // apply），立即播会抢在攻击动画与武器音之前（原版在 PostActionCheck
+        // 播，更是远在攻击动画结束之后）。本击时刻 = hitAt + 已入队飘字快照数 ×
+        // roundGapMs（多段攻击第 N 击顺延 N 个挥砍间隔）+ popupLag。
+        const hitDelayOf = (t) => {
+            const staged = (t._palPopupQueue ? t._palPopupQueue.length : 0) *
+                (window.PalBattleAnim && PalBattleAnim.roundGapMs
+                    ? (PalBattleAnim.roundGapMs() || 0) : 0) +
+                (window.PalBattleAnim && PalBattleAnim.popupLag
+                    ? (PalBattleAnim.popupLag() || 0) : 0);
+            return Se.hitDelay() + staged;
+        };
 
         if (result.hpDamage > 0) {
             if (target.isEnemy && target.isEnemy()) {
-                // 敌人倒下（fight.c 756）
-                if (target.hp <= 0) Se.play(Se.enemy(target, "die"));
+                // 敌人倒下（fight.c 756：原版在 PostActionCheck，我方实现在命中帧）
+                if (target.hp <= 0) Se.playAt(Se.enemy(target, "die"), hitDelayOf(target));
             } else if (target.isActor && target.isActor()) {
                 if (target.hp <= 0) {
                     // 我方死亡（fight.c 4816）
-                    Se.play(Se.actor(target, "deathSound"));
+                    Se.playAt(Se.actor(target, "deathSound"), hitDelayOf(target));
                 } else {
                     // 我方濒死（fight.c 850）：跨过 maxHP/5 这条线且没死
                     const prev = target.hp + result.hpDamage;
                     const line = Math.floor(target.mhp / 5);
                     if (line > 0 && target.hp < line && prev >= line) {
-                        Se.play(Se.actor(target, "dyingSound"));
+                        Se.playAt(Se.actor(target, "dyingSound"), hitDelayOf(target));
                     }
                 }
             }
         }
     };
 
-    // 每次行动开始清掉「本次攻击已喊过」的标记
+    // 每次行动开始清掉「本次攻击已喊过圈数」的计数
     const _actionStart = Game_Battler.prototype.performActionStart;
     Game_Battler.prototype.performActionStart = function (action) {
-        this._palAtkSeDone = false;
+        this._palAtkSeCount = 0;
         if (_actionStart) _actionStart.call(this, action);
     };
 
