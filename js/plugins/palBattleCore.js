@@ -464,13 +464,26 @@
         });
     };
 
+    // 「自动防御」的单次判定缓存。
+    // 原版 fight.c 4719-4757 是在【敌方摆完招式、特效起播之前】对每个目标掷一次
+    // RandomLong(0,2)==0，结果存进 rgfMagAutoDefend[]（单体术则存 fAutoDefend），
+    // 随后伤害公式读它（4801-4803 / 4836-4838）。本项目 magicDamage 在一次结算里
+    // 可能被调用多次，若不缓存同一击会掷出不同的免伤，故锁定到受击者身上；
+    // Game_Action#apply 每次受击前置回 null（= 重新掷骰）。
+    PalBattleCore.magicAutoDefend = function (target) {
+        if (target._palMagAutoDefend === null || target._palMagAutoDefend === undefined) {
+            target._palMagAutoDefend = PalBattleCore.rollMagicAutoDefend(target);
+        }
+        return target._palMagAutoDefend;
+    };
+
     // 返回仙术伤害的最终除数（1 = 不减免）
     PalBattleCore.magicDefendDivisor = function (target) {
         if (!target || !target.isActor()) return 1;
         let divisor = 1;
         if (target.isStateAffected(GUARD_STATE_ID)) divisor *= 2;   // 防御指令
         if (PalBattleCore.hasProtect(target)) divisor *= 2;         // 真元护体 / 金刚咒
-        if (PalBattleCore.rollMagicAutoDefend(target)) divisor += 1;// 随机格挡
+        if (PalBattleCore.magicAutoDefend(target)) divisor += 1;    // 自动防御（1/3，fight.c 4734）
         return divisor;
     };
 
@@ -555,6 +568,8 @@
     // 结算前先跑一遍脚本伤害（真气清零 / 扣钱），多目标只跑一次
     const _apply = Game_Action.prototype.apply;
     Game_Action.prototype.apply = function (target) {
+        // 每次受击重掷一次「仙术自动防御」（原版 fight.c 4719-4757 在敌方出招前逐目标判一次）
+        target._palMagAutoDefend = null;
         PalBattleCore.prepareSpecial(this);
         // 队友掩护：成立则整段伤害 + 附带道具都不跑（fight.c 5052 / 5139）
         const coverer = PalBattleCore.resolveCover(this, target);
@@ -651,6 +666,27 @@
             d = Math.floor(d * 2 / 3);
         }
         return d;
+    };
+
+    //=============================================================================
+    // 自动选敌（fight.c 87-128 PAL_BattleSelectAutoTargetFrom）
+    // --------------------------------------------------------------------------
+    // 先沿用上次【手动】选中的敌人槽位（原版 g_Battle.UI.iPrevEnemyTarget，这里
+    // 是 BattleManager._palLastTarget，在 onEnemyOk 时记录）—— 还活着就继续用它；
+    // 否则从 begin 起环形扫描第一个活口；全场无活口返回 -1（原版 assert 不会走到）。
+    // 手动选敌 / 围攻自动选敌 / 出手前重验目标 三处共用同一套顺序。
+    //=============================================================================
+
+    PalBattleCore.selectAutoTargetFrom = function (begin) {
+        const troop = $gameTroop.members();
+        const prev = BattleManager._palLastTarget | 0;
+        if (troop[prev] && troop[prev].isAlive()) return prev;
+        const start = (begin >= 0 && begin < troop.length) ? begin : 0;
+        for (let k = 0; k < troop.length; k++) {
+            const i = (start + k) % troop.length;
+            if (troop[i] && troop[i].isAlive()) return i;
+        }
+        return -1;
     };
 
     // 行动系数。coef 显式传入时优先（合体技用 10）

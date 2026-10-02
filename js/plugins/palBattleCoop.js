@@ -22,8 +22,16 @@
  * 2. 指令盘（uibattle.c 811-817）：原版十字键位 上=攻击 左=仙术
  *    右=合体 下=杂项。本工程四按钮：右=合体、下=杂项菜单
  *    （围攻/道具/防御/逃跑/状态，见 palBattleMisc.js）。
- * 3. 发动条件（uibattle.c 308-321）：参战≥2人、全员体力≥最大体力/5、
- *    无昏睡/疯魔(混乱)/咒封/定身。不满足时按钮变红不可用。
+ * 3. 发动条件（uibattle.c 328-335，PAL_CLASSIC 分支）：参战≥2人、
+ *    发动者本人健康、健康人数 > 1。不满足时按钮变红不可用。
+ *    ⚠ common.h 25-27：未定义 ENABLE_REVISIED_BATTLE 时【默认定义 PAL_CLASSIC】，
+ *    所以 PAL_CLASSIC 分支才是原版（DOS/98 柔情版通用）行为；
+ *    写在同一 switch 里的另一支（#ifndef PAL_CLASSIC，uibattle.c 313-327 的
+ *    「全员体力≥最大体力/5 + 时间条满 + 未在行动」）是 SDLPAL 自带的
+ *    「修订版战斗」（ENABLE_REVISIED_BATTLE，含 ATB 时间条改造），不是 98 版。
+ *    「健康」= PAL_IsPlayerHealthy（fight.c 52-76）= 非濒死(hp ≥ min(100, mhp/5))
+ *    && 无 昏睡/疯魔/咒封/定身/傀儡。本项目状态表无「傀儡」→ 该项无从检查，
+ *    其余五项与 PAL_IsPlayerHealthy 一一对应（见 canUse）。
  * 4. 发动即消耗【全部】参战者的行动轮次：发动合体技后不再询问其余角色，
  *    直接开始回合结算（fight.c 每人行动位 rgfCoop 标记，其余人行动轮空）。
  *    实现：beginCoopMagic 成功配置行动后置 BattleManager._pendingPalCoop，
@@ -179,6 +187,8 @@
 
     // D9 参战者判定：原版 PAL_IsPlayerHealthy（fight.c 52-76）
     //   = 非濒死(hp >= min(100, mhp/5)) && 无 眠/乱/封/定/傀儡
+    //   ⚠ 第六项 kStatusPuppet（傀儡）本项目状态表里没有（States.json 无此状态），
+    //     无状态可查，故只列不判；其余五项与下面逐条一一对应。
     PalBattleCoop.isHealthy = function (a) {
         if (!a || !a.isAlive()) return false;
         if (a.hp < Math.min(100, Math.floor(a.mhp / 5))) return false; // 濒死
@@ -193,8 +203,14 @@
         return this.allMembers().filter(a => this.isHealthy(a));
     };
 
-    // 发动条件（uibattle.c 328-335，PAL_CLASSIC 分支）：
-    //   发动者本人健康 + 健康人数 > 1（不查体力下限 —— 那是非 PAL_CLASSIC 分支才有的）
+    // 发动条件（uibattle.c 328-335，PAL_CLASSIC 分支 = 原版）：
+    //   发动者本人健康 + 健康人数 > 1。
+    //   （「全员体力 ≥ 最大体力/5 + 时间条满」是 #ifndef PAL_CLASSIC 的修订版分支，
+    //     即 SDLPAL 的 ENABLE_REVISIED_BATTLE，不适用 98 柔情版。）
+    // 原版在【出手前】还有一道同口径复验（fight.c 3364-3379：iTotalHealthy <= 1
+    //   → 整个动作回落 kBattleActionAttack 普攻）。本项目虽为回合制，但队员可能在
+    //   结算前被先手打死/打成濒死，故这一道同样保留 —— 实现见文件末尾的
+    //   `PalBattleCoop.fallbackToAttack` + BattleManager.startAction 包装。
     PalBattleCoop.canUse = function (actor) {
         if (!this.skillOf(actor)) return false;
         const members = this.allMembers();
@@ -261,7 +277,17 @@
 
     const _startAction = BattleManager.startAction;
     BattleManager.startAction = function () {
-        if (this._action && this._action._palCoop) PalBattleCoop.payCoopCost(this._action);
+        // ⚠ 必须取 subject.currentAction()：wrapper 里的 this._action 还是【上一次】的动作
+        //   （MZ 是在 startAction() 内部才给 _action 赋值的），拿它判 _palCoop 会恒假。
+        const subject = this._subject;
+        const action = subject && subject.currentAction ? subject.currentAction() : null;
+        // ① 出手前复验（fight.c 3364-3379）：队友在结算前阵亡 → 健康人数 ≤ 1 → 整个动作
+        //    回落普攻（fallbackToAttack 定义见文件末尾「出手前复验」段）
+        if (action && action._palCoop && !PalBattleCoop.canUse(subject)) {
+            PalBattleCoop.fallbackToAttack(subject, action);
+        }
+        // ② 代价：全体参战者扣体力（fight.c 3954-3967，合体技不耗真气）
+        if (action && action._palCoop) PalBattleCoop.payCoopCost(action);
         _startAction.call(this);
     };
 
@@ -502,6 +528,26 @@
     BattleManager.startTurn = function () {
         this._palCoopConsumeAll = false; // 保险：回合开始时清标志
         _startTurn.call(this);
+    };
+
+    //=============================================================================
+    // 出手前复验（fight.c 3364-3379）
+    //   原版在【动作真正执行前】用同一口径重算一遍参战者：
+    //     for (i..) { coopContributors[i] = PAL_IsPlayerHealthy(w); iTotalHealthy++; }
+    //     if (iTotalHealthy <= 1) → action 整个回落 kBattleActionAttack（普攻，wActionID=0）
+    //   本项目是「先全员下指令、再按速度依次结算」，下指令那一刻 canUse 成立，
+    //   但队友完全可能在【结算前】被先手打死/打成濒死 → 出手时健康人数只剩 1，
+    //   这一支因此真实可达（不是死代码），必须复验。
+    //   其余人被吞掉的行动轮次【不回滚】：原版选合体技时同样跳过了其余人的指令
+    //   （fight.c 1417-1424），回合数消耗一致。
+    //=============================================================================
+
+    PalBattleCoop.fallbackToAttack = function (actor, action) {
+        action._palCoop = false;
+        action.setAttack();              // 等价 kBattleActionAttack + wActionID = 0
+        action.setTarget(-1);            // 目标位 -1 → 交给 validateTarget 自动挑活口
+        if (actor.setLastBattleSkill) actor.setLastBattleSkill(actor.attackSkillId());
+        console.log("[合体技] 出手前复验：健康人数 ≤ 1 → 回落普攻（fight.c 3374-3378）");
     };
 
     // 选敌取消后恢复指令盘（palBattleTarget 只兜底了 attack 分支）

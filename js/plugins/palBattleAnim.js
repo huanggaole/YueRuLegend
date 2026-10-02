@@ -81,7 +81,8 @@
         stepBackFrames: 3,        // 后退位移帧数
         stepBackHoldMs: 200,      // 后退后保持多久开始回位（原版约 5 战斗帧 = 200ms）
         returnFrames: 10,         // 回位动画帧数
-        blockPoseMs: 240          // 格挡姿势（帧3）持续时间 = 6 战斗帧
+        blockPoseMs: 240,         // 格挡姿势（帧3）持续时间 = 6 战斗帧
+        magicGuardMs: 240         // 挨仙术时的「自动防御」姿势（帧3）持续 = 6 战斗帧
     };
     const PAL98 = window.PAL98 = window.PAL98 || {};
     PAL98.setStepBack = function (x, y, holdMs) {
@@ -325,38 +326,52 @@
     };
 
     //=============================================================================
-    // 出手前重验攻击目标（fight.c 3500-3507）
+    // 出手前重验目标（fight.c 3249-3507 PAL_BattlePlayerValidateAction）
     // --------------------------------------------------------------------------
-    // 原版：攻击动作执行前，若记录的目标槽位已空（敌人已死），按
-    // PAL_BattleSelectAutoTargetFrom 自动改选活口 —— 围攻/手动选的目标
-    // 在轮到自己出手前被队友击毙时，不会对着一个不存在的敌人挥刀。
-    // 重选顺序：先沿用上次手动选敌槽位（iPrevEnemyTarget），再从原槽位起
-    // 向后环形找第一个活口；全场无活口则不改（胜负判定正在等收尾演出）。
+    // 原版在【每个我方动作执行前】重新校验记录的目标槽。凡是对敌动作
+    // （普攻 / 对敌仙术 / 合体技 / 投掷道具）都走同一条兜底：
+    //
+    //   if (fToEnemy && sTarget >= 0 && rgEnemy[sTarget].wObjectID == 0)  // 阵亡即清槽
+    //       sTarget = PAL_BattleSelectAutoTargetFrom(sTarget);            // 改选活口
+    //
+    // 全体动作（magic.wFlags & ApplyToAll / 武器 rgwAttackAll）目标位固定 -1，
+    // 交给 makeTargets 铺开，不在这里改。敌方不适用：原版敌方是在
+    // PAL_BattleEnemyPerformAction 里当场调 PAL_BattleEnemySelectTargetIndex()
+    // 随机挑活口（fight.c 4520-4545），本工程对应 _targetIndex = -1 → randomTarget()。
+    //
+    // ⚠ 这里此前只覆盖普攻，且读的是 this._action —— MZ 的 _action 是在
+    //   startAction() 函数体内部才赋值的，包装器里拿到的是【上一个动作】，
+    //   条件恒假等于没生效。现在统一取 subject.currentAction()，并把投掷/仙术纳入。
     //=============================================================================
 
-    const _startActionRetarget = BattleManager.startAction;
+    // 单体对敌动作：普攻（非全体攻击武器）/ 对敌仙术（含合体技）/ 单体投掷
+    const isSingleEnemyAction = function (subject, action) {
+        if (!action || !action.item || !action.item()) return false;
+        if (!action.isForOpponent || !action.isForOpponent()) return false;
+        if (action.needsSelection && !action.needsSelection()) return false;   // 全体
+        if (action.isAttack && action.isAttack() && PalBattleAnim.isAttackAll(subject)) return false;
+        return true;
+    };
+
+    // 目标槽已阵亡/为空 → 按原版顺序改选活口。返回是否改过。
+    PalBattleAnim.validateTarget = function (subject, action) {
+        if (!subject || !subject.isActor || !subject.isActor()) return false;
+        if (!isSingleEnemyAction(subject, action)) return false;
+        const troop = $gameTroop.members();
+        const cur = troop[action._targetIndex];
+        if (cur && cur.isAlive()) return false;                // 目标还活着，不动
+        const idx = PalBattleCore.selectAutoTargetFrom(action._targetIndex);
+        if (idx < 0) return false;                             // 全场无活口：胜负判定在等收尾
+        action.setTarget(idx);
+        return true;
+    };
+
+    const _startActionValidate = BattleManager.startAction;
     BattleManager.startAction = function () {
-        const action = this._action;
         const subject = this._subject;
-        if (action && action.isAttack && action.isAttack() &&
-            subject && subject.isActor && subject.isActor() &&
-            !PalBattleAnim.isAttackAll(subject)) {
-            const troop = $gameTroop.members();
-            const cur = troop[action._targetIndex];
-            if (!cur || !cur.isAlive()) {
-                const prev = this._palLastTarget | 0;
-                let idx = (troop[prev] && troop[prev].isAlive()) ? prev : -1;
-                if (idx < 0) {
-                    const begin = action._targetIndex >= 0 ? action._targetIndex : 0;
-                    for (let k = 0; k < troop.length; k++) {
-                        const i = (begin + k) % troop.length;
-                        if (troop[i] && troop[i].isAlive()) { idx = i; break; }
-                    }
-                }
-                if (idx >= 0) action.setTarget(idx);
-            }
-        }
-        _startActionRetarget.call(this);
+        const action = subject && subject.currentAction ? subject.currentAction() : null;
+        PalBattleAnim.validateTarget(subject, action);
+        _startActionValidate.call(this);
     };
 
     //=============================================================================
@@ -792,16 +807,25 @@
                 f = (a._palHurtAt && t >= a._palHurtAt && t - a._palHurtAt < 6 * battleMs())
                     ? AF.HURT : AF.IDLE;
             }
+        // 瞬间姿势优先于虚弱/昏睡常态帧（fight.c：命中当帧无条件
+        // wCurrentFrame = 3（格挡，5023-5027）或 4（受击，5054），虚弱帧1也被覆盖；
+        // 命中序列结束后才按 死亡→帧2 / 濒死→帧1 / 原帧 恢复，5108-5116）。
+        // 眠/乱/定不会走到这里：canAutoDefend 已排除（fight.c 4975-4985）。
+        } else if (a._palGuardAt && t >= a._palGuardAt && t - a._palGuardAt < PAL98_COVER.guardMs) {
+            f = AF.GUARD; // 队友掩护姿势（fight.c 5016：wCurrentFrame = 3）
+        } else if (a._palDodgeAt && t >= a._palDodgeAt && t - a._palDodgeAt < PAL98_ANIM.blockPoseMs) {
+            f = AF.GUARD; // 自动格挡姿势（fight.c 5023-5027：wCurrentFrame = 3）
+        } else if (a._palMagGuardAt && t >= a._palMagGuardAt &&
+            t - a._palMagGuardAt < PAL98_ANIM.magicGuardMs) {
+            // 挨敌方仙术时的「自动防御」（fight.c 4719-4757：满足条件者 wCurrentFrame = 3）。
+            // 只摆姿势、不位移 —— 原版这一支没有 pos 变化（位移只在受击 5097-5112）。
+            f = AF.GUARD;
+        } else if (a._palHurtAt && t >= a._palHurtAt && t - a._palHurtAt < 6 * battleMs()) {
+            f = AF.HURT; // 受击帧4（fight.c 5054）
         } else if (SLEEP_STATES.some(id => a.isStateAffected(id)) || a.hp < Math.min(100, a.mhp / 5)) {
             f = AF.SLEEP; // 昏睡 / 濒死（HP < min(100, maxHP/5)，fight.c 47-48）
         } else if (a.isStateAffected(GUARD_STATE_ID)) {
             f = AF.GUARD;
-        } else if (a._palGuardAt && t >= a._palGuardAt && t - a._palGuardAt < PAL98_COVER.guardMs) {
-            f = AF.GUARD; // 队友掩护姿势（fight.c 5016：wCurrentFrame = 3）
-        } else if (a._palDodgeAt && t - a._palDodgeAt < PAL98_ANIM.blockPoseMs) {
-            f = AF.GUARD; // 自动格挡姿势（fight.c 5023-5027：wCurrentFrame = 3）
-        } else if (a._palHurtAt && t >= a._palHurtAt && t - a._palHurtAt < 6 * battleMs()) {
-            f = AF.HURT;
         }
         setActorFrame(this, f);
     };
@@ -889,6 +913,12 @@
 
     Window_BattleLog.prototype.displayDamage = function (target) {
         const result = target.result();
+        // 挨敌方仙术的「自动防御」姿势（fight.c 4719-4757：wCurrentFrame = 3）。
+        // 判定与伤害减半都在 PalBattleCore（rollMagicAutoDefend → magicDefendDivisor），
+        // 结果随伤害结算缓存到受击者的 _palMagAutoDefend，这里只负责摆帧。
+        if (target.isActor && target.isActor() && target._palMagAutoDefend) {
+            target._palMagGuardAt = PalBattleAnim.hitAt();
+        }
         if (result.missed) {
             // 原版没有 "Miss" 文字：被打者摆自动防御姿势帧3（Game_Actor.performMiss）
             if (result.physical) target.performMiss();

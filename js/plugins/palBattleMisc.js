@@ -415,23 +415,67 @@
     //（症状：图标框顶部被道具列表的底框切平）。
     Window_PalBattleItemList.prototype.drawShape = function () { };
 
-    // 内容裁剪区：原版 7 行文字只占到 PAL y = 12 + 7*18 = 138，再往下就是底框。
-    // 裁到 138（=414px）才不会让 MZ 多画出来的第 8 行从底框里穿出来。
-    // 顺带 maxPageRows() = floor(414/54) = 7，正好是原版的 iLinesPerPage。
+    // 内容区上边距 = 原版框顶留白(25) + 那 6 PAL(=18px) 的抬头补偿。
+    // ⚠ 抬头补偿必须落在【内容区位置】上，绝不能加进 itemRect：
+    //   MZ 的滚动模型（ensureCursorVisible / maxPageRows / maxScrollY / topIndex）
+    //   一律按「第 r 行占 [r*itemHeight, (r+1)*itemHeight)」算。itemRect 里多出来
+    //   那 18px 会让 ensureCursorVisible 每次都【少滚 18px】（它按
+    //   itemBottom - innerHeight = 39 去滚，而实际需要 54），于是光标能停在第 8 行，
+    //   而第 8 行被画在内容位图之外（位图高 = innerHeight）——
+    //   整行连名字带光标全看不见，就是"光标走到看不见的第 8 行、少了一行"。
+    // 位置换算（改动前后屏幕像素完全一致）：
+    //   旧：clientArea.y = 25，itemRect.y 自带 +18 → 第一行屏幕 y = 25 + 18 = 43
+    //   新：clientArea.y = 25 + 18 = 43，itemRect.y 从 0 起 → 第一行屏幕 y = 43
+    const CLIENT_TOP = () => 25 + kPal(PAL_ITEM.textY);
+
+    Window_PalBattleItemList.prototype._updateClientArea = function () {
+        const pad = this.padding;                     // 本类固定 padding = 0
+        this._clientArea.move(pad, pad + CLIENT_TOP()); // 只设 x/y，不传 width/height
+        if (this.innerWidth > 0 && this.innerHeight > 0) {
+            this._clientArea.visible = this.isOpen();
+        } else {
+            this._clientArea.visible = false;
+        }
+    };
+
+    // 鼠标命中：默认 hitTest 以 padding 为内容原点，而本窗内容区在 clientArea(0, CLIENT_TOP)
+    //（与 palBattleSkill 同一处错位：点中的行比看到的偏上一行）。
+    // 这里按内容区实际位置换算；命中范围也裁到内容区（否则会点到框外）。
+    Window_PalBattleItemList.prototype.hitTest = function (x, y) {
+        const top = CLIENT_TOP();
+        if (x < 0 || x >= this.innerWidth || y < top || y >= top + this.innerHeight) {
+            return -1;
+        }
+        const cx = x;                 // 本窗滚动恒为整行，origin 不参与内容位置
+        const cy = y - top;
+        const topIndex = this.topIndex();
+        for (let i = 0; i < this.maxVisibleItems(); i++) {
+            const index = topIndex + i;
+            if (index < this.maxItems()) {
+                const rect = this.itemRect(index);
+                if (rect.contains(cx, cy)) return index;
+            }
+        }
+        return -1;
+    };
+
+    // 内容裁剪区 = 严格 7 行（= 7 × itemHeight）。
+    // 必须写成 7 × itemHeight()，不能写成 round((textY + 7*cellH) * k)：
+    // maxPageRows = floor(innerHeight / itemHeight)，只有恰好等于 7×itemHeight
+    // 才稳定得到 7 行翻页（写成 (6+126)*k = 393 时 floor(393/54)=7 是巧合，
+    // 一旦 k 变化就会掉到 6 行）。
     Object.defineProperty(Window_PalBattleItemList.prototype, "innerHeight", {
         get: function () {
-            // 严格 7 行：PAL y = textY + 7*18。再多就会把第 8 行的头露在底框里，
-            //（MZ 的 pickTopIndex/maxPageRows 也靠这个算出 7 行翻页）。
-            // 第 7 行的文字底 ≈ rect.y + 30 + 字形高，仍在裁剪区内，不会被切。
-            return Math.round((PAL_ITEM.textY + 7 * PAL_ITEM.cellH) * (Graphics.boxWidth / 320));
+            return 7 * this.itemHeight();
         },
         configurable: true
     });
 
-    // 内容位图高度 = 裁剪区高度（411），不沿用 MZ 的 innerHeight + itemHeight。
+    // 内容位图高度 = 裁剪区高度，不沿用 MZ 的 innerHeight + itemHeight。
     // MZ 靠 AlphaFilter 的 filterArea 裁内容，那不是真裁剪；位图本身高度才是
-    // 硬边界。锁到 411 之后，第 8 行（y≥414）压根画不到位图上，
-    // 不可能从底框里穿出来。
+    // 硬边界（超出位图高度的绘制根本不存在）。锁到 7 行之后，折叠在下面的行
+    // 压根画不到位图上，不可能从底框里穿出来；滚动到位后再按新的
+    // scrollBaseY 重画，才出现在最后一行。
     Window_PalBattleItemList.prototype.contentsHeight = function () {
         return this.innerHeight;
     };
@@ -444,12 +488,13 @@
     };
 
     // 原版格子：文字在 PAL_XY(15 + 100*col, 12 + 18*row)
+    // ⚠ y 从 0 起（MZ 的行模型），那条 6 PAL 的抬头补偿由 _updateClientArea 承担。
     Window_PalBattleItemList.prototype.itemRect = function (index) {
         const cols = this.maxCols();
         const col = index % cols;
         const row = Math.floor(index / cols);
         const x = kPal(PAL_ITEM.textX - PAL_ITEM.boxX) + col * kPal(PAL_ITEM.cellW);
-        const y = kPal(PAL_ITEM.textY) + row * kPal(PAL_ITEM.cellH) - this.scrollBaseY();
+        const y = row * kPal(PAL_ITEM.cellH) - this.scrollBaseY();
         return new Rectangle(x, y, kPal(PAL_ITEM.cellW), kPal(PAL_ITEM.cellH));
     };
 
@@ -876,7 +921,19 @@
             if (this._palThrowAll) {
                 return $gameTroop.members().filter(e => e && e.isAlive());
             }
-            const t = this._targetIndex >= 0 ? $gameTroop.members()[this._targetIndex] : null;
+            // 原版 fight.c 3415-3429 + 3499-3506：单体投掷在出手前重验目标，
+            // 记录的目标槽已阵亡就按 PAL_BattleSelectAutoTargetFrom 改选活口。
+            // 这里与 palBattleAnim.validateTarget 是同一套兜底（那层覆盖普攻/仙术/
+            // 合体技，这层保证投掷在任何调用路径下都不会打到尸体上）。
+            const troop = $gameTroop.members();
+            let idx = this._targetIndex;
+            let t = idx >= 0 ? troop[idx] : null;
+            if (!t || !t.isAlive()) {
+                idx = (window.PalBattleCore && PalBattleCore.selectAutoTargetFrom)
+                    ? PalBattleCore.selectAutoTargetFrom(this._targetIndex) : -1;
+                t = idx >= 0 ? troop[idx] : null;
+                if (t) this.setTarget(idx);        // 同步回 _targetIndex，快照/演出一致
+            }
             return t ? [t] : [];
         }
         return _makeTargets.call(this);

@@ -230,4 +230,57 @@
         }
     };
 
+    //=========================================================================
+    // 5. 混乱状态的【常驻抖动】——battle.c 114-122 / 187-197
+    //
+    //    原版在【绘制战斗精灵时】对本地 pos 副本加随机偏移：
+    //      敌人（battle.c 114-122）：混乱 && !昏睡 && !定身 → pos.x += RandomLong(-1, 1)
+    //      我方（battle.c 187-197）：混乱 && !昏睡 && !定身 && HP>0 && !濒死
+    //                                 → pos.y += RandomLong(-1, 1)
+    //    ⚠ 我方是【上下】抖、敌人是【左右】抖 —— 原版两处写的是不同的轴，别统一。
+    //    ⚠ 原版只改绘制用的本地副本，不动 g_Battle.rgPlayer[].pos；
+    //      本项目挂在 Sprite_Battler.updatePosition 末尾（与吹飞 _palBlowX 同一处），
+    //      下一帧 updatePosition 会重写 x/y，所以偏移不会累积。
+    //    ⚠ 随机按【战斗帧】节流（40ms / PAL98_SPEED）：原版绘制 25fps，
+    //      若按渲染帧（60fps）随机会抖得比原版碎。
+    //=========================================================================
+
+    const SHAKE_PAL = 1;                                  // RandomLong(-1, 1)
+    const kShake = () => Graphics.boxWidth / 320;
+    PalBattleConfuse.shakeEnabled = true;
+
+    const randLong = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+
+    // 本帧该给这个精灵加多少偏移（PAL 单位）；null = 不抖
+    function shakeOffsetOf(battler) {
+        const affected = id => battler.isStateAffected && battler.isStateAffected(id);
+        if (!CONFUSE_STATES.some(affected)) return null;
+        if (SLEEP_STATES.concat(PARA_STATES).some(affected)) return null;
+        const v = randLong(-SHAKE_PAL, SHAKE_PAL);
+        if (battler.isActor && battler.isActor()) {
+            if (!(battler.hp > 0)) return null;
+            if (window.PalBattleCore && PalBattleCore.isDying && PalBattleCore.isDying(battler)) return null;
+            return { x: 0, y: v };                        // 我方：上下
+        }
+        return { x: v, y: 0 };                            // 敌人：左右
+    }
+
+    const _updatePositionShake = Sprite_Battler.prototype.updatePosition;
+    Sprite_Battler.prototype.updatePosition = function () {
+        _updatePositionShake.call(this);
+        if (!PalBattleConfuse.shakeEnabled) return;
+        const b = this._actor || this._enemy;
+        if (!b) return;
+        const now = performance.now();
+        // 每个战斗帧重新抽一次（原版是每帧绘制各抽一次）
+        if (!b._palShake || now - b._palShake.at >= battleMs()) {
+            const off = shakeOffsetOf(b);
+            b._palShake = { at: now, on: !!off, x: off ? off.x : 0, y: off ? off.y : 0 };
+        }
+        if (b._palShake.on) {
+            this.x += b._palShake.x * kShake();
+            this.y += b._palShake.y * kShake();
+        }
+    };
+
 })();

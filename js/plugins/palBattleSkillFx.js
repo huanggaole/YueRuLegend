@@ -28,8 +28,14 @@
  *
  * ===== 尚未还原 =====
  *  · 灵葫咒(84) 收妖炼蛊、飞龙探云手(98) 偷窃、金蝉脱壳(99) 逃跑 —— 需要对应系统
- *  · 敌人版回梦/夺魂（脚本 0xA851 / 0xA873 分支）：敌人用这些招时是给我方上状态，
- *    目前只还原了我方使用的分支
+ *    （金蝉脱壳/灵葫咒已由 palSpecialArts.js 实现）
+ *
+ * ===== 敌用分支（v1.1 补，见 ENEMY_FX）=====
+ * 敌人放回梦/夺魂/鬼降时走仙术脚本的 0x0068「敌方回合」分支（Scripts.json）：
+ *  回梦 0xA851：0x0006 门 70 → 69% → 39391（0x002D 状态2昏睡×3回合）
+ *  夺魂 0xA873：0x0006 门 30 → 29% → 0x005F 我方立即暴毙
+ *  鬼降 0xA85C：0x0006 门 50 → 49% → 39398（0x002D 状态0疯魔×3回合）
+ * 另修正：我方鬼降的 0x0006 门是 44（成功 43%），旧表错写成 100。
  */
 
 (() => {
@@ -53,7 +59,7 @@
         67: { instantDeath: 33 },              // 夺魂
         // ---- 给敌人上状态（0x002E；回梦还有 0x0006：>= 60 才跳走 → 成功 59%）
         66: { enemyState: 10, turns: 4, chance: 60 },  // 回梦 → 昏睡3 状态（4 回合）
-        68: { enemyState: 9, turns: 4, chance: 100 },  // 鬼降 → 疯魔
+        68: { enemyState: 9, turns: 4, chance: 44 },   // 鬼降 → 疯魔（0x0006 门 44 → 成功 43%）
         // ---- 复活（0x0022：HP = 最大体力 × n / 10）
         36: { revive: 1 },                     // 还魂咒 → 10% 体力
         37: { revive: 3 },                     // 赎魂   → 30% 体力
@@ -71,6 +77,17 @@
 
     // 我方状态号 → RMMZ 状态 ID（用于「冰心诀」清状态）
     const PAL_STATUS_TO_MZ = { 0: 9, 1: 7, 2: 10, 3: 6 }; // 疯魔/定身/昏睡/咒封
+
+    //=============================================================================
+    // 敌用分支（0x0068「敌方回合才跳」之后的代码路径，Scripts.json 实测）
+    //   chance 对齐 0x0006：RandomLong(1,100) >= chance → 失败，成功 = (chance-1)%
+    //=============================================================================
+
+    PalSkillFx.ENEMY_FX = {
+        66: { state: 10, turns: 3, chance: 70 },  // 回梦：69% → 我方昏睡 3 回合（39391: 0x002D 状态2×3）
+        67: { kill: true, chance: 30 },           // 夺魂：29% → 我方立即暴毙（43123-43124: 0x005F）
+        68: { state: 9, turns: 3, chance: 50 }    // 鬼降：49% → 我方疯魔 3 回合（39398: 0x002D 状态0×3）
+    };
 
     //=============================================================================
     // 敌人巫抗（Objects.csv 敌人对象的 Word1 = wResistanceToSorcery）
@@ -97,6 +114,22 @@
         const res = target.result();
         // 原版：仙术本身必定生效（没有 miss 判定），只有 ScriptOnUse 里的概率跳转会失败
         if (res && (res.missed || res.evaded)) return;
+
+        // 敌用分支：回梦/夺魂/鬼降（0x0068 之后的代码路径，作用于我方）
+        if (subject.isEnemy() && target.isActor()) {
+            const efx = PalSkillFx.ENEMY_FX[pal.mid];
+            if (!efx) return;
+            if (randInt(1, 100) >= efx.chance) return;      // 0x0006 概率门
+            if (efx.kill) {
+                target.setHp(0);
+                target.addState(target.deathStateId());
+                target.performCollapse();
+            } else if (efx.state) {
+                target.addState(efx.state);                 // 0x002D：无抗性判定，直接生效
+                if (efx.turns) target._stateTurns[efx.state] = efx.turns;
+            }
+            return;
+        }
 
         if (fx.poisonEnemy && target.isEnemy()) {
             // 0x0028: RandomLong(0, 9) >= 敌人巫抗 → 中毒
