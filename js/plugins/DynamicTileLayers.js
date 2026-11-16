@@ -269,11 +269,14 @@ Tilemap.prototype._isHigherTile = function (tileId) {
 Tilemap.prototype._processHighTile = function (tileId, dx, dy, mx, my, regionId, layerIndex) {
     if (tileId === 0) return false;
 
-    let height = 0;
-    if (layerIndex < 2) {
-        height = regionId % 10;
+    // Regions 0–159 preserve the original decimal encoding. The remaining
+    // 96 values store lower heights 10–15 with any of the 16 upper heights.
+    let height;
+    if (regionId >= 160) {
+        const packed = regionId - 160;
+        height = layerIndex < 2 ? 10 + packed % 6 : Math.floor(packed / 6);
     } else {
-        height = Math.floor(regionId / 10);
+        height = layerIndex < 2 ? regionId % 10 : Math.floor(regionId / 10);
     }
 
     if (height > 0) {
